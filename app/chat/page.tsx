@@ -44,6 +44,9 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   });
 
+  const greeting = useEffectEvent(() => t("chat.greeting"));
+  const loadErrorMessage = useEffectEvent(() => t("chat.loadError"));
+
   useEffect(() => {
     const token = sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!token) {
@@ -69,12 +72,12 @@ export default function ChatPage() {
         setMessages([
           {
             role: "assistant",
-            content: t("chat.greeting"),
+            content: greeting(),
           },
         ]);
       } catch {
         if (!cancelled) {
-          setLoadError(t("chat.loadError"));
+          setLoadError(loadErrorMessage());
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -84,15 +87,13 @@ export default function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [router, t]);
+  }, [router]);
 
-  // Refresh local greeting when language changes (only before any chat turns).
-  useEffect(() => {
-    setMessages((prev) => {
-      if (prev.length !== 1 || prev[0]?.role !== "assistant") return prev;
-      return [{ role: "assistant", content: t("chat.greeting") }];
-    });
-  }, [locale, t]);
+  // Derive greeting from locale so language toggles update without setState-in-effect.
+  const displayMessages =
+    messages.length === 1 && messages[0]?.role === "assistant"
+      ? [{ role: "assistant" as const, content: t("chat.greeting") }]
+      : messages;
 
   useEffect(() => {
     scrollToBottom();
@@ -183,7 +184,7 @@ export default function ChatPage() {
       />
 
       <div className="mt-6 flex flex-1 flex-col gap-3 overflow-y-auto">
-        {messages.map((m, i) => (
+        {displayMessages.map((m, i) => (
           <MessageBubble key={`${m.role}-${i}`} message={m} />
         ))}
         {sending ? (

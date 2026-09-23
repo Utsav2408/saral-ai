@@ -10,7 +10,7 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import {
@@ -36,7 +36,33 @@ type LocaleContextValue = {
 
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
+/** Same-tab subscribers — `storage` events only fire across tabs. */
+const listeners = new Set<() => void>();
+
+/** In-memory fallback when localStorage is unavailable (private mode). */
+let memoryLocale: Locale | null = null;
+
+function emitChange() {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", listener);
+  }
+  return () => {
+    listeners.delete(listener);
+    if (typeof window !== "undefined") {
+      window.removeEventListener("storage", listener);
+    }
+  };
+}
+
 function readStoredLocale(): Locale {
+  if (memoryLocale !== null) return memoryLocale;
   if (typeof window === "undefined") return DEFAULT_LOCALE;
   try {
     return parseLocale(window.localStorage.getItem(LOCALE_STORAGE_KEY));
@@ -45,31 +71,37 @@ function readStoredLocale(): Locale {
   }
 }
 
+function writeLocale(locale: Locale) {
+  memoryLocale = locale;
+  try {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    /* private mode — preference stays in-memory for this tab */
+  }
+  emitChange();
+}
+
+function getServerSnapshot(): Locale {
+  return DEFAULT_LOCALE;
+}
+
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
-  const [ready, setReady] = useState(false);
+  const locale = useSyncExternalStore(
+    subscribe,
+    readStoredLocale,
+    getServerSnapshot,
+  );
 
   useEffect(() => {
-    setLocaleState(readStoredLocale());
-    setReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!ready) return;
     document.documentElement.lang = LOCALE_HTML_LANG[locale];
-    try {
-      window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-    } catch {
-      /* private mode — preference stays in-memory for this tab */
-    }
-  }, [locale, ready]);
+  }, [locale]);
 
   const setLocale = useCallback((next: Locale) => {
-    setLocaleState(parseLocale(next));
+    writeLocale(parseLocale(next));
   }, []);
 
   const toggleLocale = useCallback(() => {
-    setLocaleState((prev) => nextLocale(prev));
+    writeLocale(nextLocale(readStoredLocale()));
   }, []);
 
   const t = useCallback(
