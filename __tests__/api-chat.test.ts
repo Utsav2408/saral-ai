@@ -49,12 +49,18 @@ async function uploadSample(): Promise<string> {
   return body.token as string;
 }
 
-function chatRequest(token: string, message: unknown) {
+function chatRequest(
+  token: string,
+  message: unknown,
+  locale?: "en" | "hi",
+) {
   return chatPOST(
     new Request(`http://localhost/api/session/${token}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(
+        locale ? { message, locale } : { message },
+      ),
     }),
     { params: Promise.resolve({ token }) },
   );
@@ -78,6 +84,35 @@ describe("POST /api/session/[token]/chat", () => {
     const token = "a".repeat(43);
     const res = await chatRequest(token, "hi");
     expect(res.status).toBe(404);
+  });
+
+  it("passes locale through to runChatTurn", async () => {
+    const token = await uploadSample();
+    runChatTurnMock.mockResolvedValue({
+      ok: true,
+      reply: { role: "assistant", content: "हाँ" },
+      messages: [
+        { role: "user", content: "जमा?" },
+        { role: "assistant", content: "हाँ" },
+      ],
+      regime: {
+        state: "Maharashtra",
+        category: "residential_rent",
+        code: "rent_control",
+        label: "x",
+        stateCode: "MH",
+        known: true,
+      },
+      retrievedCount: 1,
+      usage: {},
+      retried: false,
+    });
+
+    const res = await chatRequest(token, "जमा?", "hi");
+    expect(res.status).toBe(200);
+    expect(runChatTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ locale: "hi", message: "जमा?" }),
+    );
   });
 
   it("returns 400 for empty message via runChatTurn", async () => {
@@ -129,7 +164,9 @@ describe("POST /api/session/[token]/chat", () => {
     });
 
     const firstPromise = chatRequest(token, "first");
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => {
+      expect(runChatTurnMock).toHaveBeenCalled();
+    });
     const second = await chatRequest(token, "second");
     expect(second.status).toBe(429);
     release();

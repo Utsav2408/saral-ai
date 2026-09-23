@@ -7,13 +7,12 @@ import {
   ActivityMain,
 } from "@/components/ActivityChrome";
 import { useActivityLoad } from "@/lib/client/use-activity-load";
-import type { SummaryResponse } from "@/types/session";
 
 /**
  * Summary — key facts, conflict/gap flags, and an actionable checklist.
  */
 export default function SummaryPage() {
-  const { data, error, loading, retry } = useActivityLoad<SummaryResponse>(
+  const { data, error, loading, retry } = useActivityLoad(
     "summary",
     "Could not summarize this document. Please try again.",
   );

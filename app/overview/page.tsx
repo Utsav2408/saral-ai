@@ -4,8 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ErrorPanel } from "@/components/ErrorPanel";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { useLocale } from "@/components/LocaleProvider";
+import { OVERVIEW_ACTIVITY_CARDS } from "@/lib/activities/registry";
 import { sessionExpiredHomeHref } from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
+import type { MessageKey } from "@/lib/i18n/messages";
+import { parseWithSchema, sessionPublicSchema } from "@/lib/schemas/session";
 import type { SessionPublic } from "@/types/session";
 
 function formatDeposit(facts: SessionPublic["facts"]): string {
@@ -14,22 +19,32 @@ function formatDeposit(facts: SessionPublic["facts"]): string {
   return `₹${amount}`;
 }
 
-function regimeCopy(state?: string): string | null {
-  if (!state) return null;
-  if (state === "Maharashtra") {
-    return "Likely governed by the Maharashtra Rent Control Act — Chat can cite statute excerpts for this state.";
-  }
-  if (state === "Uttar Pradesh") {
-    return "Likely governed by the UP Urban Premises Tenancy Act — Chat can cite statute excerpts for this state.";
-  }
-  return `State detected: ${state}. Chat will retrieve the closest available statute excerpts.`;
-}
+const ACTIVITY_TITLE_KEY: Record<
+  (typeof OVERVIEW_ACTIVITY_CARDS)[number]["id"],
+  MessageKey
+> = {
+  chat: "activity.chat.title",
+  simplify: "activity.simplify.title",
+  summary: "activity.summary.title",
+  options: "activity.options.title",
+};
+
+const ACTIVITY_DESC_KEY: Record<
+  (typeof OVERVIEW_ACTIVITY_CARDS)[number]["id"],
+  MessageKey
+> = {
+  chat: "activity.chat.description",
+  simplify: "activity.simplify.description",
+  summary: "activity.summary.description",
+  options: "activity.options.description",
+};
 
 /**
  * Overview — shows extracted facts and parsed clauses for the current session.
  */
 export default function OverviewPage() {
   const router = useRouter();
+  const { t } = useLocale();
   const [session, setSession] = useState<SessionPublic | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -46,19 +61,25 @@ export default function OverviewPage() {
     (async () => {
       try {
         const res = await fetch(`/api/session/${encodeURIComponent(token)}`);
-        const data = (await res.json()) as
-          | SessionPublic
-          | { error: { code: string; message: string } };
+        const raw: unknown = await res.json();
         if (cancelled) return;
-        if (!res.ok || "error" in data) {
+        if (
+          !res.ok ||
+          (raw && typeof raw === "object" && raw !== null && "error" in raw)
+        ) {
           sessionStorage.removeItem(SESSION_STORAGE_KEY);
           router.replace(sessionExpiredHomeHref());
           return;
         }
-        setSession(data);
+        const parsed = parseWithSchema(sessionPublicSchema, raw);
+        if (!parsed.ok) {
+          setError(t("overview.loadError"));
+          return;
+        }
+        setSession(parsed.data);
       } catch {
         if (!cancelled) {
-          setError("Could not load your document. Please try again.");
+          setError(t("overview.loadError"));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -68,7 +89,14 @@ export default function OverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, t]);
+
+  function regimeBanner(state?: string): string | null {
+    if (!state) return null;
+    if (state === "Maharashtra") return t("overview.regime.mh");
+    if (state === "Uttar Pradesh") return t("overview.regime.up");
+    return t("overview.regime.other", { state });
+  }
 
   if (loading && !error) {
     return (
@@ -76,7 +104,7 @@ export default function OverviewPage() {
         id="main"
         className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
       >
-        Loading overview…
+        {t("overview.loading")}
       </main>
     );
   }
@@ -88,7 +116,7 @@ export default function OverviewPage() {
         className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16"
       >
         <ErrorPanel
-          message={error ?? "Session not found."}
+          message={error ?? t("overview.notFound")}
           showHomeLink
         />
       </main>
@@ -97,12 +125,12 @@ export default function OverviewPage() {
 
   const subtitle = [
     session.facts.state,
-    session.facts.propertyType ?? "Residential lease",
+    session.facts.propertyType ?? t("overview.residential"),
   ]
     .filter(Boolean)
     .join(" · ");
 
-  const banner = regimeCopy(session.facts.state);
+  const banner = regimeBanner(session.facts.state);
 
   return (
     <main
@@ -113,13 +141,11 @@ export default function OverviewPage() {
         <Link
           href="/"
           className="rounded-lg px-2 py-1 text-lg text-ink"
-          aria-label="Back to Home"
+          aria-label={t("overview.backHome")}
         >
           ‹
         </Link>
-        <span className="text-sm text-ink-muted" aria-hidden="true">
-          Aa
-        </span>
+        <LanguageToggle />
       </header>
 
       <h1 className="font-display text-2xl font-bold leading-snug text-ink">
@@ -128,13 +154,13 @@ export default function OverviewPage() {
       <p className="mt-1 text-sm text-ink-muted">{subtitle}</p>
 
       <div className="mt-5 grid grid-cols-3 gap-2">
-        <FactCard label="Deposit" value={formatDeposit(session.facts)} />
+        <FactCard label={t("overview.deposit")} value={formatDeposit(session.facts)} />
         <FactCard
-          label="Lease start"
+          label={t("overview.leaseStart")}
           value={session.facts.leaseStart ?? "—"}
         />
         <FactCard
-          label="Notice"
+          label={t("overview.notice")}
           value={session.facts.noticePeriod ?? "—"}
         />
       </div>
@@ -146,34 +172,22 @@ export default function OverviewPage() {
       ) : null}
 
       <h2 className="mt-8 text-base font-semibold text-ink">
-        What would you like to do?
+        {t("overview.whatNext")}
       </h2>
       <div className="mt-3 grid grid-cols-2 gap-3">
-        <ActivityCard
-          title="Chat with it"
-          description="Ask anything about your lease."
-          href="/chat"
-        />
-        <ActivityCard
-          title="Simplify it"
-          description="Plain language, clause by clause."
-          href="/simplify"
-        />
-        <ActivityCard
-          title="Summary & checklist"
-          description="Key facts, flags, to-dos."
-          href="/summary"
-        />
-        <ActivityCard
-          title="Your options"
-          description="What you can do next."
-          href="/options"
-        />
+        {OVERVIEW_ACTIVITY_CARDS.map((card) => (
+          <ActivityCard
+            key={card.id}
+            title={t(ACTIVITY_TITLE_KEY[card.id])}
+            description={t(ACTIVITY_DESC_KEY[card.id])}
+            href={card.href}
+          />
+        ))}
       </div>
 
       <section className="mt-8" aria-labelledby="clauses-heading">
         <h2 id="clauses-heading" className="text-base font-semibold text-ink">
-          Clauses ({session.clauseCount})
+          {t("overview.clauses", { count: session.clauseCount })}
         </h2>
         <ul className="mt-3 space-y-2">
           {session.clauses.map((clause) => {
@@ -195,7 +209,7 @@ export default function OverviewPage() {
                   aria-controls={panelId}
                 >
                   <span className="text-xs font-semibold uppercase tracking-wide text-primary">
-                    Clause {clause.index}
+                    {t("overview.clause", { index: clause.index })}
                     {clause.heading ? ` · ${clause.heading}` : ""}
                   </span>
                   <p

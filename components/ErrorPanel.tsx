@@ -3,7 +3,10 @@
  * Prefer this over ad-hoc `role="alert"` paragraphs so copy stays consistent.
  */
 
+"use client";
+
 import Link from "next/link";
+import { useLocale } from "@/components/LocaleProvider";
 
 type ErrorPanelProps = {
   /** User-safe message (already passed through {@link mapApiError}). */
@@ -27,6 +30,7 @@ export function ErrorPanel({
   showHomeLink = false,
   className = "",
 }: ErrorPanelProps) {
+  const { t } = useLocale();
   return (
     <div className={`flex flex-col gap-3 ${className}`.trim()}>
       <p
@@ -42,7 +46,7 @@ export function ErrorPanel({
             onClick={onRetry}
             className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white"
           >
-            Retry
+            {t("error.retry")}
           </button>
         ) : null}
         {showOverviewLink ? (
@@ -50,7 +54,7 @@ export function ErrorPanel({
             href="/overview"
             className="text-sm font-semibold text-primary underline"
           >
-            Back to Overview
+            {t("error.backOverview")}
           </Link>
         ) : null}
         {showHomeLink ? (
@@ -58,7 +62,7 @@ export function ErrorPanel({
             href="/"
             className="text-sm font-semibold text-primary underline"
           >
-            Back to Home
+            {t("error.backHome")}
           </Link>
         ) : null}
       </div>

@@ -24,6 +24,11 @@ import {
   SIMPLIFY_MIN_OUTPUT_TOKENS,
   SIMPLIFY_TOKENS_PER_CLAUSE,
 } from "@/lib/constants";
+import {
+  simplifyLocaleInstruction,
+  withLocaleSystemPrompt,
+} from "@/lib/i18n/ai-locale";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/locale";
 import type { Clause, SimplifiedClause } from "@/types/session";
 
 const simplifiedElementSchema = z.object({
@@ -68,6 +73,8 @@ export type RunSimplifyResult = SimplifySuccess | SimplifyFailure;
 
 export type RunSimplifyArgs = {
   clauses: Clause[];
+  /** UI / output language (default English). */
+  locale?: Locale;
   /** Override model (tests). Defaults to env-backed clarityModel. */
   model?: ClarityLanguageModel;
   /** Inject generateText for unit tests. */
@@ -100,14 +107,17 @@ export function truncateClauseText(text: string): string {
  * Build the user prompt with fenced untrusted clause bodies.
  * Complexity: O(C · L) for C clauses of length L.
  */
-export function buildSimplifyPrompt(clauses: Clause[]): string {
+export function buildSimplifyPrompt(
+  clauses: Clause[],
+  locale: Locale = DEFAULT_LOCALE,
+): string {
   const blocks = packClausesXml(clauses, {
     maxClauses: clauses.length,
     maxChars: MAX_CLAUSE_CHARS_FOR_LLM,
     includeIndex: true,
     includeHeading: true,
   });
-  return `Paraphrase each of the following ${clauses.length} lease clause(s). Return JSON with one element per clause.\n\n${blocks}`;
+  return `Paraphrase each of the following ${clauses.length} lease clause(s). Return JSON with one element per clause.${simplifyLocaleInstruction(locale)}\n\n${blocks}`;
 }
 
 /**
@@ -182,6 +192,7 @@ async function callSimplifyLlm(args: {
   generate: GenerateFn;
   clauses: Clause[];
   system: string;
+  locale: Locale;
 }): Promise<
   | { ok: true; items: SimplifyLlmItem[]; usage: LlmUsage }
   | SimplifyFailure
@@ -191,7 +202,7 @@ async function callSimplifyLlm(args: {
     const result = await args.generate({
       model: args.model,
       system: args.system,
-      prompt: buildSimplifyPrompt(args.clauses),
+      prompt: buildSimplifyPrompt(args.clauses, args.locale),
       temperature: 0.2,
       maxOutputTokens: simplifyMaxOutputTokens(count),
       output: Output.array({
@@ -234,6 +245,8 @@ export async function runSimplify(
   options: RunSimplifyArgs,
 ): Promise<RunSimplifyResult> {
   const { clauses } = options;
+  const locale = options.locale ?? DEFAULT_LOCALE;
+  const systemBase = withLocaleSystemPrompt(SYSTEM_PROMPT, locale);
 
   if (clauses.length === 0) {
     return {
@@ -259,7 +272,8 @@ export async function runSimplify(
     model,
     generate,
     clauses,
-    system: SYSTEM_PROMPT,
+    locale,
+    system: systemBase,
   });
   if (!first.ok) {
     return first;
@@ -290,7 +304,8 @@ export async function runSimplify(
     model,
     generate,
     clauses,
-    system: SYSTEM_PROMPT + STRICT_ADDENDUM,
+    locale,
+    system: systemBase + STRICT_ADDENDUM,
   });
   if (!second.ok) {
     return {

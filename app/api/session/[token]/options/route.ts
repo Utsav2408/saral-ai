@@ -3,24 +3,21 @@
  * Caches successful results. Never logs document content or matched escalation terms.
  */
 
-import { NextResponse } from "next/server";
-import { runOptions } from "@/lib/ai/options";
-import { optionsLock } from "@/lib/ai/token-lock";
-import {
-  activityFailureResponse,
-  handleActivityRequest,
-  rateLimitedResponse,
-} from "@/lib/api/activity-route";
+import { runOptions, type RunOptionsResult } from "@/lib/ai/options";
+import { getCachedActivity } from "@/lib/activities/registry";
+import { handleCachedActivityRequest } from "@/lib/api/cached-activity";
 import type { SessionRouteContext } from "@/lib/api/require-session";
-import { withTokenLock } from "@/lib/api/with-token-lock";
-import { safeLog } from "@/lib/logging/safe-log";
 import { sessionStore } from "@/lib/session/store";
 import type { OptionsResponse, OptionsResult } from "@/types/session";
 
 export const runtime = "nodejs";
 
+const activity = getCachedActivity("options");
+
 /** Exported for tests to reset in-process locks between cases. */
-export const clearOptionsLocks = optionsLock.clear;
+export const clearOptionsLocks = activity.lock.clear;
+
+type OptionsSuccess = Extract<RunOptionsResult, { ok: true }>;
 
 function toOptionsResponse(
   token: string,
@@ -45,91 +42,50 @@ function toOptionsResponse(
 export async function POST(
   _request: Request,
   context: SessionRouteContext,
-): Promise<
-  NextResponse<OptionsResponse | { error: { code: string; message: string } }>
-> {
-  return handleActivityRequest("options", context, async ({ token, session, started }) => {
-    if (session.options) {
-      safeLog({
-        activity: "options",
-        ok: true,
-        cached: true,
-        validated: true,
-        escalation: session.options.escalation,
-        clauseCount: session.clauses.length,
-        latencyMs: Date.now() - started,
-      });
-      return NextResponse.json(
-        toOptionsResponse(
+) {
+  return handleCachedActivityRequest<OptionsResponse, OptionsSuccess>(
+    context,
+    {
+      activity: activity.id,
+      lock: activity.lock,
+      rateLimitMessage: activity.rateLimitMessage,
+      readCache: (session) => {
+        if (!session.options) return null;
+        return toOptionsResponse(
           session.token,
           session.title,
           session.options,
           true,
-        ),
-      );
-    }
-
-    return withTokenLock({
-      tryAcquire: optionsLock.tryAcquire,
-      release: optionsLock.release,
-      token,
-      blocked: () =>
-        rateLimitedResponse(
-          "options",
-          started,
-          "Options is already running or was just requested. Try again shortly.",
-          { clauseCount: session.clauses.length },
-        ),
-      work: async () => {
-        const result = await runOptions({ session });
-
-        // Persist sticky escalation even on failure when the guard ran.
-        if (result.ok === false && result.escalation) {
+        );
+      },
+      cacheLog: (session) => ({
+        escalation: session.options?.escalation,
+      }),
+      run: async (session) => runOptions({ session }),
+      onFailure: (token, _session, failure) => {
+        if (failure.escalation) {
           sessionStore.update(token, { escalation: true });
         }
-
-        if (!result.ok) {
-          return activityFailureResponse(
-            "options",
-            started,
-            result.code,
-            result.message,
-            {
-              clauseCount: session.clauses.length,
-              escalation: result.escalation ?? session.escalation,
-              usage: result.usage,
-            },
-          );
-        }
-
+      },
+      onSuccess: (token, session, result) => {
         const updated = sessionStore.update(token, {
           options: result.options,
           optionsCachedAt: Date.now(),
           escalation: result.options.escalation,
         });
-
-        safeLog({
-          activity: "options",
-          ok: true,
-          validated: true,
-          cached: false,
-          escalation: result.options.escalation,
-          retrievedCount: result.retrievedCount,
-          clauseCount: session.clauses.length,
-          promptTokens: result.usage.promptTokens,
-          completionTokens: result.usage.completionTokens,
-          latencyMs: Date.now() - started,
-        });
-
-        return NextResponse.json(
-          toOptionsResponse(
+        return {
+          response: toOptionsResponse(
             token,
             (updated ?? session).title,
             result.options,
             false,
           ),
-        );
+          log: {
+            escalation: result.options.escalation,
+            retrievedCount: result.retrievedCount,
+          },
+        };
       },
-    });
-  });
+    },
+  );
 }

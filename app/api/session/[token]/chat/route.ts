@@ -14,6 +14,7 @@ import {
 import type { SessionRouteContext } from "@/lib/api/require-session";
 import { withTokenLock } from "@/lib/api/with-token-lock";
 import { MAX_CHAT_MESSAGE_CHARS } from "@/lib/constants";
+import { DEFAULT_LOCALE, localeFromBody } from "@/lib/i18n/locale";
 import { safeLog } from "@/lib/logging/safe-log";
 import { sessionStore } from "@/lib/session/store";
 import { toRegimeDto } from "@/lib/tools/state-law-status";
@@ -64,6 +65,7 @@ export async function POST(
     }
 
     const raw = readMessage(body);
+    const locale = localeFromBody(body);
     const trimmed = raw?.trim() ?? "";
     if (!trimmed) {
       return activityFailureResponse(
@@ -93,7 +95,11 @@ export async function POST(
           "Chat is already running or was just requested. Try again shortly.",
         ),
       work: async () => {
-        const result = await runChatTurn({ session, message: trimmed });
+        const result = await runChatTurn({
+          session,
+          message: trimmed,
+          locale: locale ?? DEFAULT_LOCALE,
+        });
 
         if (!result.ok) {
           return activityFailureResponse(

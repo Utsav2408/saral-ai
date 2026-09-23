@@ -26,6 +26,7 @@ type CreateSessionInput = {
 /** Patchable fields for session updates (Simplify / Summary / Options cache). */
 type SessionUpdatePatch = {
   simplifiedClauses?: SimplifiedClause[];
+  simplifyLocale?: Session["simplifyLocale"];
   simplifyCachedAt?: number;
   messages?: Session["messages"];
   summary?: SummaryResult;

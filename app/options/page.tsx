@@ -8,13 +8,12 @@ import {
 } from "@/components/ActivityChrome";
 import { CitationPills } from "@/components/CitationPills";
 import { useActivityLoad } from "@/lib/client/use-activity-load";
-import type { OptionsResponse } from "@/types/session";
 
 /**
  * Options — escalation banner, RERA applicability, and next-step guidance.
  */
 export default function OptionsPage() {
-  const { data, error, loading, retry } = useActivityLoad<OptionsResponse>(
+  const { data, error, loading, retry } = useActivityLoad(
     "options",
     "Could not load options. Please try again.",
   );

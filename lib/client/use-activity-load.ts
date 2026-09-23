@@ -5,12 +5,23 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { z } from "zod";
+import { useLocale } from "@/components/LocaleProvider";
+import {
+  getCachedActivity,
+  type CachedActivityId,
+} from "@/lib/activities/registry";
 import {
   fetchActivityOnce,
   sessionExpiredHomeHref,
 } from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
+import { CACHED_ACTIVITY_RESPONSE_SCHEMAS } from "@/lib/schemas/session";
+
+export type CachedActivityResponse<A extends CachedActivityId> = z.infer<
+  (typeof CACHED_ACTIVITY_RESPONSE_SCHEMAS)[A]
+>;
 
 export type ActivityLoadState<T> = {
   data: T | null;
@@ -22,16 +33,31 @@ export type ActivityLoadState<T> = {
 /**
  * Load a POST activity endpoint once the session token is present.
  * Handles expiry redirect and Retry via a bump counter.
+ * Success bodies are validated against the activity response schema.
+ * Passes the current UI locale so Simplify can regenerate on language switch.
  */
-export function useActivityLoad<T>(
-  activityPath: "simplify" | "summary" | "options",
+export function useActivityLoad<A extends CachedActivityId>(
+  activityPath: A,
   fallback: string,
-): ActivityLoadState<T> {
+): ActivityLoadState<CachedActivityResponse<A>> {
+  type T = CachedActivityResponse<A>;
   const router = useRouter();
+  const { locale } = useLocale();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [retryKey, setRetryKey] = useState(0);
+  const localeRef = useRef(locale);
+
+  // Language switch → clear cache UI and re-POST (Simplify is locale-keyed).
+  useEffect(() => {
+    if (localeRef.current === locale) return;
+    localeRef.current = locale;
+    setError(null);
+    setData(null);
+    setLoading(true);
+    setRetryKey((k) => k + 1);
+  }, [locale]);
 
   useEffect(() => {
     const token = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -40,11 +66,19 @@ export function useActivityLoad<T>(
       return;
     }
 
+    const def = getCachedActivity(activityPath);
+    const schema = CACHED_ACTIVITY_RESPONSE_SCHEMAS[
+      activityPath
+    ] as unknown as z.ZodType<T>;
     let cancelled = false;
     (async () => {
       const result = await fetchActivityOnce<T>(
-        `/api/session/${encodeURIComponent(token)}/${activityPath}`,
+        `/api/session/${encodeURIComponent(token)}/${def.path}`,
         fallback,
+        {
+          schema,
+          ...(activityPath === "simplify" ? { body: { locale } } : {}),
+        },
       );
       if (cancelled) return;
       if (!result.ok) {
@@ -65,7 +99,7 @@ export function useActivityLoad<T>(
     return () => {
       cancelled = true;
     };
-  }, [router, retryKey, activityPath, fallback]);
+  }, [router, retryKey, activityPath, fallback, locale]);
 
   const retry = useCallback(() => {
     setError(null);

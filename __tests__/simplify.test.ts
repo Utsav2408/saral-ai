@@ -80,6 +80,11 @@ describe("buildSimplifyPrompt", () => {
     expect(prompt).toContain("</clause>");
   });
 
+  it("asks for Hindi paraphrases when locale is hi", () => {
+    const prompt = buildSimplifyPrompt(clauses, "hi");
+    expect(prompt).toMatch(/Hindi/);
+  });
+
   it("escapes attribute quotes in headings", () => {
     const prompt = buildSimplifyPrompt([
       {

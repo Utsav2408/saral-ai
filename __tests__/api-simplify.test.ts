@@ -154,6 +154,47 @@ describe("POST /api/session/[token]/simplify", () => {
     spy.mockRestore();
   });
 
+  it("bypasses cache when locale differs", async () => {
+    const token = await uploadSample();
+    const session = sessionStore.get(token)!;
+    const simplified = session.clauses.map((c) => ({
+      clauseId: c.id,
+      simpleText: `Plain: ${c.text.slice(0, 40)}`,
+      entityCheckPassed: true,
+    }));
+
+    runSimplifyMock.mockResolvedValue({
+      ok: true,
+      simplified,
+      usage: { promptTokens: 1, completionTokens: 2 },
+      retried: false,
+    });
+
+    await simplifyPOST(
+      new Request(`http://localhost/api/session/${token}/simplify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locale: "en" }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(runSimplifyMock).toHaveBeenCalledTimes(1);
+    expect(runSimplifyMock.mock.calls[0]?.[0]).toMatchObject({ locale: "en" });
+
+    clearSimplifyLocks();
+
+    await simplifyPOST(
+      new Request(`http://localhost/api/session/${token}/simplify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locale: "hi" }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(runSimplifyMock).toHaveBeenCalledTimes(2);
+    expect(runSimplifyMock.mock.calls[1]?.[0]).toMatchObject({ locale: "hi" });
+  });
+
   it("maps ENTITY_CHECK_FAILED to 422", async () => {
     const token = await uploadSample();
     runSimplifyMock.mockResolvedValue({
@@ -208,9 +249,9 @@ describe("POST /api/session/[token]/simplify", () => {
       { params: Promise.resolve({ token }) },
     );
 
-    // Allow the first request to acquire the lock
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(runSimplifyMock).toHaveBeenCalled();
+    });
 
     const second = await simplifyPOST(
       new Request(`http://localhost/api/session/${token}/simplify`, {

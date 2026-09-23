@@ -12,7 +12,8 @@ import {
   requireSession,
   type SessionRouteContext,
 } from "@/lib/api/require-session";
-import { safeLog, type ClarityActivity } from "@/lib/logging/safe-log";
+import type { ClarityActivity } from "@/lib/activities/registry";
+import { safeLog } from "@/lib/logging/safe-log";
 import type { ApiErrorBody, Session } from "@/types/session";
 
 export type ActivityHandlerContext = {

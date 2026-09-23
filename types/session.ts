@@ -147,6 +147,8 @@ export interface Session {
   messages: ChatMessage[];
   /** Cached Simplify output — set after first successful POST /simplify. */
   simplifiedClauses?: SimplifiedClause[];
+  /** Locale used when simplify cache was written (`en` | `hi`). */
+  simplifyLocale?: "en" | "hi";
   /** Epoch ms when simplify cache was written. */
   simplifyCachedAt?: number;
   /** Cached Summary output — set after first successful POST /summary. */

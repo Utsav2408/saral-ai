@@ -2,9 +2,12 @@
  * Shared chrome for activity pages (loading / error shells + header).
  */
 
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ErrorPanel } from "@/components/ErrorPanel";
+import { useLocale } from "@/components/LocaleProvider";
 
 const MAIN_CLASS =
   "mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16";
@@ -61,20 +64,24 @@ type ActivityHeaderProps = {
   meta?: string;
   /** Larger display title (Simplify); default is compact. */
   large?: boolean;
+  /** Optional trailing control (e.g. language toggle). */
+  end?: ReactNode;
 };
 
-/** Back-to-overview header used on every activity page. */
+/** Back-to-overview header used on every activity screen. */
 export function ActivityHeader({
   title,
   subtitle,
   meta,
   large = false,
+  end,
 }: ActivityHeaderProps) {
+  const { t } = useLocale();
   return (
     <header className="flex items-start gap-3">
       <Link
         href="/overview"
-        aria-label="Back to overview"
+        aria-label={t("chrome.backOverview")}
         className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-primary-soft"
       >
         <ChevronLeft />
@@ -94,6 +101,7 @@ export function ActivityHeader({
         ) : null}
         {meta ? <p className="mt-1 text-xs text-ink-muted">{meta}</p> : null}
       </div>
+      {end ? <div className="mt-1 shrink-0">{end}</div> : null}
     </header>
   );
 }

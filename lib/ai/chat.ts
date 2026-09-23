@@ -32,6 +32,8 @@ import {
   type RegimeResult,
 } from "@/lib/tools/state-law-status";
 import { lookupStatute } from "@/lib/tools/lookup-statute";
+import { withLocaleSystemPrompt } from "@/lib/i18n/ai-locale";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/locale";
 import type {
   ChatMessage,
   Clause,
@@ -82,6 +84,8 @@ export type RunChatResult = ChatSuccess | ChatFailure;
 export type RunChatArgs = {
   session: Session;
   message: string;
+  /** UI / answer language (default English). */
+  locale?: Locale;
   model?: ClarityLanguageModel;
   generate?: typeof generateText;
   lookup?: typeof lookupStatute;
@@ -121,6 +125,7 @@ export function buildSystemPrompt(args: {
   facts: ExtractedFacts;
   clauses: Clause[];
   hits: StatuteHit[];
+  locale?: Locale;
 }): string {
   const factsLines = formatFactsForPrompt(args.facts, [
     "state",
@@ -143,7 +148,10 @@ export function buildSystemPrompt(args: {
     )
     .join("\n");
 
-  return `${SYSTEM_BASE}
+  const locale = args.locale ?? DEFAULT_LOCALE;
+  const base = withLocaleSystemPrompt(SYSTEM_BASE, locale);
+
+  return `${base}
 
 Regime: ${args.regime.label} (code=${args.regime.code}, known=${args.regime.known}).
 Extracted facts: ${factsLines || "none"}.
@@ -292,11 +300,13 @@ export async function runChatTurn(
     };
   }
 
+  const locale = options.locale ?? DEFAULT_LOCALE;
   const system = buildSystemPrompt({
     regime,
     facts: options.session.facts,
     clauses: options.session.clauses,
     hits,
+    locale,
   });
   const messages = buildChatMessages(options.session, message, system);
 

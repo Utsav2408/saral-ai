@@ -158,7 +158,9 @@ describe("POST /api/session/[token]/summary", () => {
     });
 
     const firstPromise = summaryRequest(token);
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => {
+      expect(runSummaryMock).toHaveBeenCalled();
+    });
     const second = await summaryRequest(token);
     expect(second.status).toBe(429);
     release();

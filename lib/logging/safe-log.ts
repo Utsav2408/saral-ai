@@ -3,14 +3,9 @@
  * Complexity: O(1) per call.
  */
 
-/** Allowlisted activity names for structured GenAI / session logs. */
-export type ClarityActivity =
-  | "upload"
-  | "session_get"
-  | "simplify"
-  | "chat"
-  | "summary"
-  | "options";
+import type { ClarityActivity } from "@/lib/activities/registry";
+
+export type { ClarityActivity };
 
 export type SafeLogFields = {
   activity: ClarityActivity | string;

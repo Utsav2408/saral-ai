@@ -133,6 +133,25 @@ describe("fetchActivityOnce", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("posts JSON body when provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchActivityOnce("/api/x", "fallback", {
+      body: { locale: "hi" },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/x",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ locale: "hi" }),
+      }),
+    );
+  });
+
   it("uses fallback on network failure", async () => {
     vi.stubGlobal(
       "fetch",
@@ -144,6 +163,25 @@ describe("fetchActivityOnce", () => {
       expect(result.message).toBe("Network failed");
       expect(result.status).toBe(0);
     }
+  });
+
+  it("rejects success bodies that fail the schema", async () => {
+    const { z } = await import("zod");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ token: 123 }),
+      }),
+    );
+    const result = await fetchActivityOnce<{ token: string }>(
+      "/api/x",
+      "Bad shape",
+      { schema: z.object({ token: z.string() }) },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toBe("Bad shape");
   });
 });
 

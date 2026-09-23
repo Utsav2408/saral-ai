@@ -7,8 +7,9 @@ import {
   ActivityLoading,
   ActivityMain,
 } from "@/components/ActivityChrome";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { useLocale } from "@/components/LocaleProvider";
 import { useActivityLoad } from "@/lib/client/use-activity-load";
-import type { SimplifyResponse } from "@/types/session";
 
 type ViewMode = "plain" | "original";
 
@@ -16,20 +17,21 @@ type ViewMode = "plain" | "original";
  * Simplify — plain-language paraphrases with toggle back to original text.
  */
 export default function SimplifyPage() {
-  const { data, error, loading, retry } = useActivityLoad<SimplifyResponse>(
+  const { t } = useLocale();
+  const { data, error, loading, retry } = useActivityLoad(
     "simplify",
-    "Could not simplify this document. Please try again.",
+    t("simplify.error"),
   );
   const [view, setView] = useState<ViewMode>("plain");
 
   if (loading && !error) {
-    return <ActivityLoading>Simplifying your lease…</ActivityLoading>;
+    return <ActivityLoading>{t("simplify.loading")}</ActivityLoading>;
   }
 
   if (error || !data) {
     return (
       <ActivityError
-        message={error ?? "Something went wrong."}
+        message={error ?? t("simplify.error")}
         onRetry={retry}
       />
     );
@@ -41,12 +43,17 @@ export default function SimplifyPage() {
 
   return (
     <ActivityMain>
-      <ActivityHeader title="Simplified" subtitle={data.title} large />
+      <ActivityHeader
+        title={t("simplify.title")}
+        subtitle={data.title}
+        large
+        end={<LanguageToggle />}
+      />
 
       <div
         className="mt-6 flex rounded-full border border-border bg-card p-1"
         role="tablist"
-        aria-label="Text view"
+        aria-label={t("simplify.tablist")}
         onKeyDown={(e) => {
           if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
             e.preventDefault();
@@ -59,14 +66,14 @@ export default function SimplifyPage() {
           panelId="panel-clauses"
           selected={view === "plain"}
           onSelect={() => setView("plain")}
-          label="Plain language"
+          label={t("simplify.plain")}
         />
         <ViewTab
           id="tab-original"
           panelId="panel-clauses"
           selected={view === "original"}
           onSelect={() => setView("original")}
-          label="Original text"
+          label={t("simplify.original")}
         />
       </div>
 
@@ -82,7 +89,9 @@ export default function SimplifyPage() {
             view === "plain" && plain != null ? plain : clause.text;
           const title =
             clause.heading?.trim() ||
-            (view === "plain" ? "Clause" : `Clause ${clause.index}`);
+            (view === "plain"
+              ? t("simplify.clauseFallback")
+              : t("simplify.clause", { index: clause.index }));
 
           return (
             <li
@@ -90,7 +99,7 @@ export default function SimplifyPage() {
               className="rounded-2xl border border-border bg-card px-4 py-4"
             >
               <span className="inline-block rounded-full bg-canvas px-2.5 py-0.5 text-[11px] font-medium text-ink-muted">
-                Clause {clause.index}
+                {t("simplify.clause", { index: clause.index })}
               </span>
               <h2 className="mt-2 text-base font-semibold text-ink">{title}</h2>
               <p className="mt-2 text-sm leading-relaxed text-ink whitespace-pre-wrap">

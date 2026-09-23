@@ -1,26 +1,24 @@
 /**
  * POST /api/session/[token]/simplify — one LLM call for all clauses.
- * Caches successful results on the session. Never logs document content.
+ * Caches successful results on the session (keyed by locale). Never logs document content.
  */
 
-import { NextResponse } from "next/server";
-import { runSimplify } from "@/lib/ai/simplify";
-import { simplifyLock } from "@/lib/ai/token-lock";
-import {
-  activityFailureResponse,
-  handleActivityRequest,
-  rateLimitedResponse,
-} from "@/lib/api/activity-route";
+import { runSimplify, type RunSimplifyResult } from "@/lib/ai/simplify";
+import { getCachedActivity } from "@/lib/activities/registry";
+import { handleCachedActivityRequest } from "@/lib/api/cached-activity";
 import type { SessionRouteContext } from "@/lib/api/require-session";
-import { withTokenLock } from "@/lib/api/with-token-lock";
-import { safeLog } from "@/lib/logging/safe-log";
+import { DEFAULT_LOCALE, localeFromBody } from "@/lib/i18n/locale";
 import { sessionStore } from "@/lib/session/store";
 import type { SimplifyResponse } from "@/types/session";
 
 export const runtime = "nodejs";
 
+const activity = getCachedActivity("simplify");
+
 /** Exported for tests to reset in-process locks between cases. */
-export const clearSimplifyLocks = simplifyLock.clear;
+export const clearSimplifyLocks = activity.lock.clear;
+
+type SimplifySuccess = Extract<RunSimplifyResult, { ok: true }>;
 
 function toSimplifyResponse(
   token: string,
@@ -34,88 +32,63 @@ function toSimplifyResponse(
 
 /**
  * POST /api/session/[token]/simplify
+ * Optional JSON body: `{ "locale": "en" | "hi" }`.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   context: SessionRouteContext,
-): Promise<
-  NextResponse<SimplifyResponse | { error: { code: string; message: string } }>
-> {
-  return handleActivityRequest("simplify", context, async ({ token, session, started }) => {
-    if (session.simplifiedClauses && session.simplifiedClauses.length > 0) {
-      safeLog({
-        activity: "simplify",
-        ok: true,
-        cached: true,
-        validated: true,
-        clauseCount: session.clauses.length,
-        latencyMs: Date.now() - started,
-      });
-      return NextResponse.json(
-        toSimplifyResponse(
+) {
+  let locale = DEFAULT_LOCALE;
+  try {
+    const body: unknown = await request.json();
+    locale = localeFromBody(body);
+  } catch {
+    /* empty / non-JSON body → English */
+  }
+
+  return handleCachedActivityRequest<SimplifyResponse, SimplifySuccess>(
+    context,
+    {
+      activity: activity.id,
+      lock: activity.lock,
+      rateLimitMessage: activity.rateLimitMessage,
+      readCache: (session) => {
+        if (
+          !session.simplifiedClauses ||
+          session.simplifiedClauses.length === 0
+        ) {
+          return null;
+        }
+        const cachedLocale = session.simplifyLocale ?? DEFAULT_LOCALE;
+        if (cachedLocale !== locale) {
+          return null;
+        }
+        return toSimplifyResponse(
           session.token,
           session.title,
           session.clauses,
           session.simplifiedClauses,
           true,
-        ),
-      );
-    }
-
-    return withTokenLock({
-      tryAcquire: simplifyLock.tryAcquire,
-      release: simplifyLock.release,
-      token,
-      blocked: () =>
-        rateLimitedResponse(
-          "simplify",
-          started,
-          "Simplify is already running or was just requested. Try again shortly.",
-          { clauseCount: session.clauses.length },
-        ),
-      work: async () => {
-        const result = await runSimplify({ clauses: session.clauses });
-
-        if (!result.ok) {
-          return activityFailureResponse(
-            "simplify",
-            started,
-            result.code,
-            result.message,
-            {
-              clauseCount: session.clauses.length,
-              inventedCount: result.inventedCount,
-              usage: result.usage,
-            },
-          );
-        }
-
+        );
+      },
+      run: async (session) =>
+        runSimplify({ clauses: session.clauses, locale }),
+      onSuccess: (token, session, result) => {
         const updated = sessionStore.update(token, {
           simplifiedClauses: result.simplified,
           simplifyCachedAt: Date.now(),
+          simplifyLocale: locale,
         });
-
-        safeLog({
-          activity: "simplify",
-          ok: true,
-          validated: true,
-          cached: false,
-          clauseCount: session.clauses.length,
-          promptTokens: result.usage.promptTokens,
-          completionTokens: result.usage.completionTokens,
-          latencyMs: Date.now() - started,
-        });
-
-        return NextResponse.json(
-          toSimplifyResponse(
+        return {
+          response: toSimplifyResponse(
             token,
             (updated ?? session).title,
             (updated ?? session).clauses,
             result.simplified,
             false,
           ),
-        );
+        };
       },
-    });
-  });
+    },
+  );
 }

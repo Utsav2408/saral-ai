@@ -209,7 +209,9 @@ describe("POST /api/session/[token]/options", () => {
     });
 
     const firstPromise = optionsRequest(token);
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => {
+      expect(runOptionsMock).toHaveBeenCalled();
+    });
     const second = await optionsRequest(token);
     expect(second.status).toBe(429);
     release();

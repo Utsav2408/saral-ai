@@ -28,11 +28,12 @@
 body {
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-sans), system-ui, sans-serif;
+  /* Latin first; Devanagari Noto covers Hindi glyphs without swapping the whole UI. */
+  font-family: var(--font-sans), var(--font-sans-deva), system-ui, sans-serif;
 }
 
 .font-display {
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), var(--font-display-deva), Georgia, serif;
 }
 
 *:focus-visible {

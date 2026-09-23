@@ -9,22 +9,26 @@ import {
 } from "@/components/ActivityChrome";
 import { CitationPills } from "@/components/CitationPills";
 import { ErrorPanel } from "@/components/ErrorPanel";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { useLocale } from "@/components/LocaleProvider";
 import { mapApiErrorFromBody } from "@/lib/api/map-api-error";
 import { sessionExpiredHomeHref } from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
+import type { MessageKey } from "@/lib/i18n/messages";
 import type { ChatMessage, ChatResponse, SessionPublic } from "@/types/session";
 
-const SUGGESTIONS = [
-  "Can I sublet?",
-  "Is this deposit legal?",
-  "Can the landlord keep my full deposit?",
-];
+const SUGGESTION_KEYS = [
+  "chat.suggestion.sublet",
+  "chat.suggestion.depositLegal",
+  "chat.suggestion.depositKeep",
+] as const satisfies readonly MessageKey[];
 
 /**
  * Chat — grounded Q&A with citation pills.
  */
 export default function ChatPage() {
   const router = useRouter();
+  const { locale, t } = useLocale();
   const [title, setTitle] = useState("Your lease");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -65,13 +69,12 @@ export default function ChatPage() {
         setMessages([
           {
             role: "assistant",
-            content:
-              "I've read your lease. Ask me about deposits, notice periods, subletting, or anything else in the agreement.",
+            content: t("chat.greeting"),
           },
         ]);
       } catch {
         if (!cancelled) {
-          setLoadError("Could not load your session. Please try again.");
+          setLoadError(t("chat.loadError"));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -81,7 +84,15 @@ export default function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, t]);
+
+  // Refresh local greeting when language changes (only before any chat turns).
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length !== 1 || prev[0]?.role !== "assistant") return prev;
+      return [{ role: "assistant", content: t("chat.greeting") }];
+    });
+  }, [locale, t]);
 
   useEffect(() => {
     scrollToBottom();
@@ -106,7 +117,7 @@ export default function ChatPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text, locale }),
         },
       );
       const body = (await res.json()) as
@@ -119,13 +130,12 @@ export default function ChatPage() {
           router.replace(sessionExpiredHomeHref());
           return;
         }
-        // Restore draft; do not leave an orphan user bubble.
         setInput(text);
         setError(
           mapApiErrorFromBody(
             res.status,
             body,
-            "Could not answer that question.",
+            t("chat.error"),
           ),
         );
         return;
@@ -134,29 +144,26 @@ export default function ChatPage() {
       setTitle(body.title);
       const serverMsgs = body.messages;
       setMessages((prev) => {
-        const greeting = prev.find(
-          (m) =>
-            m.role === "assistant" &&
-            m.content.startsWith("I've read your lease"),
-        );
-        if (greeting && serverMsgs.length > 0) {
-          return [greeting, ...serverMsgs];
+        const localGreetingOnly =
+          prev.length === 1 && prev[0]?.role === "assistant";
+        if (localGreetingOnly && serverMsgs.length > 0) {
+          return [prev[0], ...serverMsgs];
         }
         return serverMsgs.length > 0 ? serverMsgs : [...prev, body.reply];
       });
       if (liveRef.current) {
-        liveRef.current.textContent = "New reply from Clarity.";
+        liveRef.current.textContent = t("chat.liveReply");
       }
     } catch {
       setInput(text);
-      setError("Could not answer that question. Please try again.");
+      setError(t("chat.errorRetry"));
     } finally {
       setSending(false);
     }
   }
 
   if (loading && !loadError) {
-    return <ActivityLoading>Opening chat…</ActivityLoading>;
+    return <ActivityLoading>{t("chat.loading")}</ActivityLoading>;
   }
 
   if (loadError) {
@@ -168,7 +175,12 @@ export default function ChatPage() {
       id="main"
       className="mx-auto flex min-h-full w-full max-w-md flex-col px-5 pb-4 pt-6"
     >
-      <ActivityHeader title="Chat" subtitle={title} large />
+      <ActivityHeader
+        title={t("chat.title")}
+        subtitle={title}
+        large
+        end={<LanguageToggle />}
+      />
 
       <div className="mt-6 flex flex-1 flex-col gap-3 overflow-y-auto">
         {messages.map((m, i) => (
@@ -176,7 +188,7 @@ export default function ChatPage() {
         ))}
         {sending ? (
           <p className="text-sm text-ink-muted" aria-live="polite">
-            Thinking…
+            {t("chat.thinking")}
           </p>
         ) : null}
         <div ref={liveRef} className="sr-only" aria-live="polite" />
@@ -194,17 +206,20 @@ export default function ChatPage() {
 
       <div className="mt-4 shrink-0">
         <div className="flex gap-2 overflow-x-auto pb-2">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              disabled={sending}
-              onClick={() => void sendMessage(s)}
-              className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-50"
-            >
-              {s}
-            </button>
-          ))}
+          {SUGGESTION_KEYS.map((key) => {
+            const s = t(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={sending}
+                onClick={() => void sendMessage(s)}
+                className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-50"
+              >
+                {s}
+              </button>
+            );
+          })}
         </div>
         <form
           className="mt-2 flex items-center gap-2"
@@ -214,21 +229,21 @@ export default function ChatPage() {
           }}
         >
           <label className="sr-only" htmlFor="chat-input">
-            Ask about your lease
+            {t("chat.inputLabel")}
           </label>
           <input
             id="chat-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={sending}
-            placeholder="Ask about your lease…"
+            placeholder={t("chat.placeholder")}
             className="min-w-0 flex-1 rounded-full border border-border bg-card px-4 py-3 text-sm text-ink placeholder:text-ink-muted"
             autoComplete="off"
           />
           <button
             type="submit"
             disabled={sending || !input.trim()}
-            aria-label="Send message"
+            aria-label={t("chat.send")}
             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white disabled:opacity-50"
           >
             <SendIcon />

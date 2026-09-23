@@ -104,6 +104,18 @@ describe("chat helpers", () => {
     expect(system).toContain("mh-mrca-s15");
     expect(system).toContain("lease-clause");
     expect(system).toContain("untrusted");
+    expect(system).not.toMatch(/Devanagari/);
+  });
+
+  it("buildSystemPrompt adds Hindi output rules when locale is hi", () => {
+    const system = buildSystemPrompt({
+      regime,
+      facts: baseSession().facts,
+      clauses: baseSession().clauses,
+      hits: [hit],
+      locale: "hi",
+    });
+    expect(system).toMatch(/Devanagari/);
   });
 
   it("appendMessages caps length", () => {
