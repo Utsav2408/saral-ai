@@ -1,5 +1,5 @@
 /**
- * Central limits and allowlists for Phase 1 upload / parsing.
+ * Central limits and allowlists for upload / parsing / Simplify.
  * Keep these conservative to bound memory and DoS surface.
  */
 
@@ -32,3 +32,27 @@ export const SESSION_STORAGE_KEY = "clarity_session";
 
 /** Token must be base64url of 32 random bytes → 43 chars typically. */
 export const TOKEN_PATTERN = /^[A-Za-z0-9_-]{40,64}$/;
+
+/** Max characters of each clause body sent to the LLM (cost / context bound). */
+export const MAX_CLAUSE_CHARS_FOR_LLM = 2_000;
+
+/**
+ * Soft cap on clauses per Simplify call. Above this, refuse rather than
+ * burn free-tier tokens on oversized leases.
+ */
+export const MAX_SIMPLIFY_CLAUSES = 80;
+
+/** Approx output tokens budgeted per clause for maxOutputTokens. */
+export const SIMPLIFY_TOKENS_PER_CLAUSE = 120;
+
+/** Floor for maxOutputTokens on a simplify call. */
+export const SIMPLIFY_MIN_OUTPUT_TOKENS = 256;
+
+/** Ceiling for maxOutputTokens on a simplify call. */
+export const SIMPLIFY_MAX_OUTPUT_TOKENS = 8_192;
+
+/**
+ * Minimum ms between simplify attempts for the same token when not cached.
+ * Protects Groq free-tier RPM during retries / double-clicks.
+ */
+export const SIMPLIFY_COOLDOWN_MS = 3_000;

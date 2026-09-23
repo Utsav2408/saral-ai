@@ -36,6 +36,19 @@ export interface ChatMessage {
 }
 
 /**
+ * Plain-language paraphrase of one clause from the Simplify activity.
+ * Cached on the session after a successful entity_check pass.
+ */
+export interface SimplifiedClause {
+  /** Matches {@link Clause.id}. */
+  clauseId: string;
+  /** Plain-language paraphrase — never invents numbers or names. */
+  simpleText: string;
+  /** Always true when cached; retained for auditability. */
+  entityCheckPassed: boolean;
+}
+
+/**
  * In-memory session created on successful upload.
  * Raw file bytes are never stored — only derived text structures.
  */
@@ -50,6 +63,10 @@ export interface Session {
   clauses: Clause[];
   facts: ExtractedFacts;
   messages: ChatMessage[];
+  /** Cached Simplify output — set after first successful POST /simplify. */
+  simplifiedClauses?: SimplifiedClause[];
+  /** Epoch ms when simplify cache was written. */
+  simplifyCachedAt?: number;
 }
 
 /** Public DTO returned by GET /api/session/[token]. */
@@ -62,6 +79,19 @@ export interface SessionPublic {
   clauses: Clause[];
   facts: ExtractedFacts;
   clauseCount: number;
+}
+
+/**
+ * Response from POST /api/session/[token]/simplify.
+ * Includes originals so the UI can toggle without a second fetch.
+ */
+export interface SimplifyResponse {
+  token: string;
+  title: string;
+  clauses: Clause[];
+  simplifiedClauses: SimplifiedClause[];
+  /** True when the result was served from session cache (no Groq call). */
+  cached: boolean;
 }
 
 /** Compact response from POST /api/upload. */

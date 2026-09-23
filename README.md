@@ -4,25 +4,25 @@ GenAI-powered assistant that makes residential leases simple enough to read, que
 
 This repo follows [`Clarity_Final_Architecture.md`](./Clarity_Final_Architecture.md).
 
-## Phase 1 status
+## Status
 
-**Skeleton & Upload** is implemented:
+| Phase | Status |
+|-------|--------|
+| 1 — Skeleton & Upload | Done — see [`docs/phase-1.md`](./docs/phase-1.md) |
+| 2 — Simplify | Done — see [`docs/phase-2.md`](./docs/phase-2.md) |
 
-- Next.js App Router (TypeScript) Home + Overview screens
-- `POST /api/upload` (PDF / plain text) → in-memory session
-- Regex clause parser + fact extraction (deposit, dates, notice, state hint)
-- Overview shows facts and parsed clauses (no LLM yet)
-
-See [`docs/phase-1.md`](./docs/phase-1.md) for API contracts and security notes.
+**Phase 2** adds Groq-powered plain-language paraphrases with `entity_check()`, session caching, and the Simplify screen (Plain / Original toggle).
 
 ## Quick start
 
 ```bash
 npm install
+cp .env.example .env.local
+# Set GROQ_API_KEY in .env.local for Simplify (upload/overview work without it)
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), upload `fixtures/leases/sample-lease.txt`, and confirm Overview shows deposit / lease start / notice plus clauses.
+Open [http://localhost:3000](http://localhost:3000), upload `fixtures/leases/sample-lease.txt`, open Overview, then **Simplify it**.
 
 ## Scripts
 
@@ -39,4 +39,4 @@ Open [http://localhost:3000](http://localhost:3000), upload `fixtures/leases/sam
 
 ## Privacy model
 
-Sessions live in a process-local `Map` keyed by a random token held in `sessionStorage`. Closing the tab (or restarting the server) clears them. Uploaded bytes are never written to disk.
+Sessions live in a process-local `Map` keyed by a random token held in `sessionStorage`. Closing the tab (or restarting the server) clears them. Uploaded bytes are never written to disk. GenAI logs are metadata-only (no document or chat content).

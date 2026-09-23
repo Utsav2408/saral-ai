@@ -13,6 +13,16 @@ export type SafeLogFields = {
   clauseCount?: number;
   /** Extension only — never the original filename (may contain PII). */
   ext?: string;
+  /** Entity-check passed for Simplify (metadata only). */
+  validated?: boolean;
+  /** Simplify served from session cache. */
+  cached?: boolean;
+  /** Prompt token count from the provider (no content). */
+  promptTokens?: number;
+  /** Completion token count from the provider (no content). */
+  completionTokens?: number;
+  /** Count of invented entities detected — never the entity strings. */
+  inventedCount?: number;
 };
 
 /**

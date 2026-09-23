@@ -9,6 +9,7 @@ import type {
   ExtractedFacts,
   Session,
   SessionPublic,
+  SimplifiedClause,
 } from "@/types/session";
 
 export type CreateSessionInput = {
@@ -18,6 +19,13 @@ export type CreateSessionInput = {
   rawTextLength: number;
   clauses: Clause[];
   facts: ExtractedFacts;
+};
+
+/** Patchable fields for session updates (e.g. Simplify cache). */
+export type SessionUpdatePatch = {
+  simplifiedClauses?: SimplifiedClause[];
+  simplifyCachedAt?: number;
+  messages?: Session["messages"];
 };
 
 /**
@@ -87,6 +95,25 @@ class SessionStore {
       return undefined;
     }
     return session;
+  }
+
+  /**
+   * Merge a patch into an existing session. Preserves token and createdAt.
+   * Complexity: O(1).
+   *
+   * @returns Updated session, or undefined if missing/expired.
+   */
+  update(token: string, patch: SessionUpdatePatch): Session | undefined {
+    const session = this.get(token);
+    if (!session) {
+      return undefined;
+    }
+    const updated: Session = {
+      ...session,
+      ...patch,
+    };
+    this.sessions.set(token, updated);
+    return updated;
   }
 
   /** Remove a session explicitly (e.g. tests). */

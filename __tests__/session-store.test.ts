@@ -62,4 +62,34 @@ describe("SessionStore", () => {
     store.clear();
     expect(store.size()).toBe(0);
   });
+
+  it("updates simplify cache fields without changing createdAt", () => {
+    const store = new SessionStore();
+    const session = store.create(makeInput());
+    const createdAt = session.createdAt;
+    const updated = store.update(session.token, {
+      simplifiedClauses: [
+        {
+          clauseId: "c-1",
+          simpleText: "Hello in plain language.",
+          entityCheckPassed: true,
+        },
+      ],
+      simplifyCachedAt: Date.now(),
+    });
+    expect(updated?.createdAt).toBe(createdAt);
+    expect(updated?.simplifiedClauses).toHaveLength(1);
+    expect(store.get(session.token)?.simplifiedClauses?.[0]?.simpleText).toBe(
+      "Hello in plain language.",
+    );
+  });
+
+  it("update returns undefined for missing token", () => {
+    const store = new SessionStore();
+    expect(
+      store.update("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", {
+        simplifyCachedAt: 1,
+      }),
+    ).toBeUndefined();
+  });
 });

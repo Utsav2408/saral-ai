@@ -148,6 +148,7 @@ export default function OverviewPage() {
         <ActivityCard
           title="Simplify it"
           description="Plain language, clause by clause."
+          href="/simplify"
         />
         <ActivityCard
           title="Summary & checklist"
@@ -211,10 +212,25 @@ function FactCard({ label, value }: { label: string; value: string }) {
 function ActivityCard({
   title,
   description,
+  href,
 }: {
   title: string;
   description: string;
+  /** When set, the card is an active link to that activity. */
+  href?: string;
 }) {
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-xl border border-border bg-card px-3 py-4 transition hover:border-primary hover:bg-primary-soft"
+      >
+        <p className="text-sm font-semibold text-ink">{title}</p>
+        <p className="mt-1 text-xs text-ink-muted">{description}</p>
+      </Link>
+    );
+  }
+
   return (
     <div
       className="rounded-xl border border-border bg-card px-3 py-4 opacity-70"

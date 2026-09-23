@@ -15,10 +15,13 @@
     "audit": "npm audit --omit=dev"
   },
   "dependencies": {
+    "@ai-sdk/groq": "^4.0.46",
+    "ai": "^7.0.111",
     "next": "16.3.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "unpdf": "^1.8.1"
+    "unpdf": "^1.8.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
