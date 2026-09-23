@@ -23,6 +23,14 @@ export type SafeLogFields = {
   completionTokens?: number;
   /** Count of invented entities detected — never the entity strings. */
   inventedCount?: number;
+  /** Number of statute chunks retrieved this turn (Chat). */
+  retrievedCount?: number;
+  /** Escalation Guard triggered (Options) — never log matched terms. */
+  escalation?: boolean;
+  /** Count of conflict/gap flags (Summary) — never flag prose. */
+  flagCount?: number;
+  /** Count of checklist items (Summary) — never checklist body text. */
+  checklistCount?: number;
 };
 
 /**

@@ -1,0 +1,26 @@
+{
+  "Maharashtra": {
+    "residential_rent": {
+      "code": "rent_control",
+      "label": "Maharashtra Rent Control Act, 1999",
+      "stateCode": "MH"
+    },
+    "rera_project": {
+      "code": "rera",
+      "label": "Maharashtra RERA (central RERA Act + state rules)",
+      "stateCode": "MH"
+    }
+  },
+  "Uttar Pradesh": {
+    "residential_rent": {
+      "code": "urban_premises_tenancy",
+      "label": "UP Regulation of Urban Premises Tenancy Act, 2021",
+      "stateCode": "UP"
+    },
+    "rera_project": {
+      "code": "rera",
+      "label": "UP RERA (central RERA Act + state rules)",
+      "stateCode": "UP"
+    }
+  }
+}

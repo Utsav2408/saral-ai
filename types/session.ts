@@ -29,10 +29,21 @@ export interface ExtractedFacts {
   propertyType?: string;
 }
 
-/** Chat message placeholder for later phases; Phase 1 keeps this empty. */
+/** Citation attached to an assistant chat message. */
+export interface ChatCitation {
+  /** Corpus chunk id or `lease:c-N`. */
+  id: string;
+  /** Short label for citation pills. */
+  label: string;
+  /** Optional allowlisted source URL. */
+  sourceUrl?: string;
+}
+
+/** Chat message stored on the session. */
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  citations?: ChatCitation[];
 }
 
 /**
@@ -46,6 +57,77 @@ export interface SimplifiedClause {
   simpleText: string;
   /** Always true when cached; retained for auditability. */
   entityCheckPassed: boolean;
+}
+
+/** Severity for a deterministic conflict / gap flag. */
+export type ConflictSeverity = "info" | "warning" | "critical";
+
+/**
+ * Rule-based conflict or gap detected before Summary / Options.
+ * Human prose is produced by the LLM; this is metadata only.
+ */
+export interface ConflictFlag {
+  /** Stable id for this flag instance, e.g. `flag-deposit_high_vs_rent`. */
+  id: string;
+  /** Rule that fired, e.g. `deposit_high_vs_rent`. */
+  ruleId: string;
+  severity: ConflictSeverity;
+  /** Machine key for LLM / i18n — never user-facing prose alone. */
+  summaryKey: string;
+  /** Lease clause ids that contributed evidence. */
+  clauseIds?: string[];
+  /** Fact field names referenced (e.g. depositAmount). */
+  factRefs?: string[];
+}
+
+/** One checklist row from the Summary activity. */
+export interface SummaryChecklistItem {
+  id: string;
+  /** Optional link back to a ConflictFlag.id. */
+  flagId?: string;
+  text: string;
+  priority: "high" | "medium" | "low";
+}
+
+/** Cached Summary activity output. */
+export interface SummaryResult {
+  flags: ConflictFlag[];
+  /** LLM-written short description per flag id. */
+  flagDescriptions: { flagId: string; description: string }[];
+  checklist: SummaryChecklistItem[];
+  overview: string;
+}
+
+/** One next-step option from the Options activity. */
+export interface OptionsStep {
+  id: string;
+  title: string;
+  body: string;
+  citations?: ChatCitation[];
+}
+
+/** Regime summary returned with chat / options responses. */
+export interface ChatRegimeDto {
+  state: string;
+  category: string;
+  code: string;
+  label: string;
+}
+
+/** RERA applicability row surfaced in Options. */
+export interface ReraCheckResult {
+  disputeType: string;
+  applicable: boolean;
+  explanation: string;
+  citeChunkId?: string;
+}
+
+/** Cached Options activity output. */
+export interface OptionsResult {
+  escalation: boolean;
+  reraChecks: ReraCheckResult[];
+  steps: OptionsStep[];
+  regime: ChatRegimeDto;
 }
 
 /**
@@ -67,6 +149,19 @@ export interface Session {
   simplifiedClauses?: SimplifiedClause[];
   /** Epoch ms when simplify cache was written. */
   simplifyCachedAt?: number;
+  /** Cached Summary output — set after first successful POST /summary. */
+  summary?: SummaryResult;
+  /** Epoch ms when summary cache was written. */
+  summaryCachedAt?: number;
+  /** Cached Options output — set after first successful POST /options. */
+  options?: OptionsResult;
+  /** Epoch ms when options cache was written. */
+  optionsCachedAt?: number;
+  /**
+   * Escalation Guard triggered for this session.
+   * Sticky until session TTL; never cleared mid-session.
+   */
+  escalation?: boolean;
 }
 
 /** Public DTO returned by GET /api/session/[token]. */
@@ -91,6 +186,46 @@ export interface SimplifyResponse {
   clauses: Clause[];
   simplifiedClauses: SimplifiedClause[];
   /** True when the result was served from session cache (no Groq call). */
+  cached: boolean;
+}
+
+/**
+ * Response from POST /api/session/[token]/chat.
+ */
+export interface ChatResponse {
+  token: string;
+  title: string;
+  reply: ChatMessage;
+  messages: ChatMessage[];
+  regime: ChatRegimeDto;
+}
+
+/**
+ * Response from POST /api/session/[token]/summary.
+ */
+export interface SummaryResponse {
+  token: string;
+  title: string;
+  facts: ExtractedFacts;
+  flags: ConflictFlag[];
+  flagDescriptions: { flagId: string; description: string }[];
+  checklist: SummaryChecklistItem[];
+  overview: string;
+  /** True when served from session cache (no Groq call). */
+  cached: boolean;
+}
+
+/**
+ * Response from POST /api/session/[token]/options.
+ */
+export interface OptionsResponse {
+  token: string;
+  title: string;
+  escalation: boolean;
+  reraChecks: ReraCheckResult[];
+  steps: OptionsStep[];
+  regime: ChatRegimeDto;
+  /** True when served from session cache (no Groq call). */
   cached: boolean;
 }
 

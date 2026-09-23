@@ -1,0 +1,32 @@
+{
+  "residential_rent_dispute": {
+    "applicable": false,
+    "explanation": "Ordinary landlord–tenant rent disputes generally fall outside RERA. Use your state’s rent authority or civil remedies instead.",
+    "citeChunkId": "central-rera-s31"
+  },
+  "deposit_refund": {
+    "applicable": false,
+    "explanation": "Security-deposit refund disputes between landlord and tenant are typically handled under rent/tenancy law, not RERA, unless the dispute is against a RERA-registered promoter/project.",
+    "citeChunkId": "central-rera-s31"
+  },
+  "eviction_threat": {
+    "applicable": false,
+    "explanation": "Eviction and recovery of possession for residential tenancies are governed by state rent/tenancy acts and courts — not RERA grievance for ordinary landlord–tenant cases.",
+    "citeChunkId": "central-rera-s31"
+  },
+  "essential_services": {
+    "applicable": false,
+    "explanation": "Withholding essential services in a residential tenancy is usually a rent-authority / civil matter under state tenancy law, not a RERA complaint against a promoter.",
+    "citeChunkId": "central-rera-s31"
+  },
+  "promoter_allottee": {
+    "applicable": true,
+    "explanation": "Disputes between an allottee and a RERA-registered promoter (or real estate agent) may be filed as a complaint under Section 31 of the RERA Act, 2016.",
+    "citeChunkId": "central-rera-s31"
+  },
+  "builder_delay": {
+    "applicable": true,
+    "explanation": "Delay in possession or related promoter obligations for a registered real estate project may give rise to a RERA complaint; check your state RERA portal for procedure.",
+    "citeChunkId": "central-rera-s31"
+  }
+}

@@ -7,9 +7,11 @@ import {
 import type {
   Clause,
   ExtractedFacts,
+  OptionsResult,
   Session,
   SessionPublic,
   SimplifiedClause,
+  SummaryResult,
 } from "@/types/session";
 
 export type CreateSessionInput = {
@@ -21,11 +23,16 @@ export type CreateSessionInput = {
   facts: ExtractedFacts;
 };
 
-/** Patchable fields for session updates (e.g. Simplify cache). */
+/** Patchable fields for session updates (Simplify / Summary / Options cache). */
 export type SessionUpdatePatch = {
   simplifiedClauses?: SimplifiedClause[];
   simplifyCachedAt?: number;
   messages?: Session["messages"];
+  summary?: SummaryResult;
+  summaryCachedAt?: number;
+  options?: OptionsResult;
+  optionsCachedAt?: number;
+  escalation?: boolean;
 };
 
 /**

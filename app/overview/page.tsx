@@ -15,9 +15,12 @@ function formatDeposit(facts: SessionPublic["facts"]): string {
 function regimeCopy(state?: string): string | null {
   if (!state) return null;
   if (state === "Maharashtra") {
-    return "Likely governed by the Maharashtra Rent Control Act — your state's tenancy law. Full statute grounding arrives in a later phase.";
+    return "Likely governed by the Maharashtra Rent Control Act — Chat can cite statute excerpts for this state.";
   }
-  return `State detected: ${state}. Statute lookup arrives in a later phase.`;
+  if (state === "Uttar Pradesh") {
+    return "Likely governed by the UP Urban Premises Tenancy Act — Chat can cite statute excerpts for this state.";
+  }
+  return `State detected: ${state}. Chat will retrieve the closest available statute excerpts.`;
 }
 
 /**
@@ -144,6 +147,7 @@ export default function OverviewPage() {
         <ActivityCard
           title="Chat with it"
           description="Ask anything about your lease."
+          href="/chat"
         />
         <ActivityCard
           title="Simplify it"
@@ -153,10 +157,12 @@ export default function OverviewPage() {
         <ActivityCard
           title="Summary & checklist"
           description="Key facts, flags, to-dos."
+          href="/summary"
         />
         <ActivityCard
           title="Your options"
           description="What you can do next."
+          href="/options"
         />
       </div>
 

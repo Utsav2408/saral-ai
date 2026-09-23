@@ -12,7 +12,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "npm run build && playwright test",
     "typecheck": "tsc --noEmit",
-    "audit": "npm audit --omit=dev"
+    "audit": "npm audit --omit=dev",
+    "corpus:embed": "tsx scripts/embed-corpus.ts"
   },
   "dependencies": {
     "@ai-sdk/groq": "^4.0.46",
@@ -36,6 +37,7 @@
     "jsdom": "^29.1.1",
     "pdf-lib": "^1.17.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.11"
   }

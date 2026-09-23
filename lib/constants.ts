@@ -56,3 +56,89 @@ export const SIMPLIFY_MAX_OUTPUT_TOKENS = 8_192;
  * Protects Groq free-tier RPM during retries / double-clicks.
  */
 export const SIMPLIFY_COOLDOWN_MS = 3_000;
+
+/** Chat conversational history window sent to the model (3 exchanges). */
+export const CHAT_HISTORY_WINDOW = 6;
+
+/** Max messages retained on the session (UI may show all of these). */
+export const MAX_CHAT_MESSAGES = 40;
+
+/** Max characters in a single user chat message. */
+export const MAX_CHAT_MESSAGE_CHARS = 2_000;
+
+/** Top-k statute chunks retrieved per chat turn. */
+export const STATUTE_TOP_K = 4;
+
+/** Max characters of each retrieved chunk body put into the LLM prompt. */
+export const MAX_CHUNK_CHARS_FOR_LLM = 1_200;
+
+/** Max characters of each lease clause in durable chat context. */
+export const MAX_CHAT_CLAUSE_CHARS = 400;
+
+/** Soft cap on clauses included in durable chat context. */
+export const MAX_CHAT_CLAUSES_IN_PROMPT = 40;
+
+/** Chat completion max output tokens. */
+export const CHAT_MAX_OUTPUT_TOKENS = 1_024;
+
+/**
+ * Minimum ms between chat attempts for the same token.
+ * Protects Groq free-tier RPM during retries / double-clicks.
+ */
+export const CHAT_COOLDOWN_MS = 2_000;
+
+/**
+ * Minimum ms between summary attempts for the same token when not cached.
+ */
+export const SUMMARY_COOLDOWN_MS = 3_000;
+
+/**
+ * Minimum ms between options attempts for the same token when not cached.
+ */
+export const OPTIONS_COOLDOWN_MS = 3_000;
+
+/** Soft cap on conflict flags returned to the LLM / UI. */
+export const MAX_CONFLICT_FLAGS = 20;
+
+/** Soft cap on checklist items from Summary. */
+export const MAX_SUMMARY_CHECKLIST = 12;
+
+/** Summary completion max output tokens. */
+export const SUMMARY_MAX_OUTPUT_TOKENS = 1_536;
+
+/** Options completion max output tokens. */
+export const OPTIONS_MAX_OUTPUT_TOKENS = 1_536;
+
+/** Max dispute types evaluated per Options request (allowlisted set). */
+export const MAX_RERA_DISPUTE_TYPES = 8;
+
+/** Max characters of each clause scanned by Escalation Guard. */
+export const MAX_ESCALATION_SCAN_CHARS = 4_000;
+
+/**
+ * Deposit ÷ monthly rent above this is "high vs typical" for Maharashtra.
+ * UP / Model Tenancy residential cap is 2× — see detect_conflicts_and_gaps.
+ */
+export const DEPOSIT_MONTHS_TYPICAL_MH = 6;
+
+/** Model Tenancy / UP residential security-deposit cap in months of rent. */
+export const DEPOSIT_MONTHS_CAP_UP_MODEL = 2;
+
+/**
+ * Allowlisted hosts for citation outbound links in the Chat UI.
+ * Keep in sync with docs/phase-3.md.
+ */
+export const CITATION_URL_ALLOWLIST = new Set([
+  "www.indiacode.nic.in",
+  "indiacode.nic.in",
+  "upload.indiacode.nic.in",
+  "maharera.mahaonline.gov.in",
+  "www.up-rera.in",
+  "up-rera.in",
+  "www.mohua.gov.in",
+  "mohua.gov.in",
+  "prsindia.org",
+  "www.prsindia.org",
+  "indiankanoon.org",
+  "www.indiankanoon.org",
+]);

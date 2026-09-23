@@ -1,0 +1,28 @@
+RESIDENTIAL LEASE AGREEMENT — ESCALATION FIXTURE
+
+This Lease Agreement is made in Maharashtra for a residential flat.
+This document is intentionally written to trigger Clarity's Escalation Guard.
+
+1. Parties
+The Landlord and the Tenant agree to the terms below for the property in Andheri West, Mumbai, Maharashtra.
+
+2. Deposit
+The Tenant shall pay a security deposit of ₹1,50,000 (INR One Lakh Fifty Thousand only) at the time of signing.
+
+3. Dispute history
+The Tenant previously filed an FIR and a police complaint concerning alleged criminal intimidation related to the premises. An ongoing suit and a court order are referenced in prior correspondence. This clause exists only for product testing of the Escalation Guard.
+
+4. Lease start
+The lease commencing from 1 Apr 2026 and shall continue subject to the terms herein.
+
+5. Lease end
+The lease expires on 31 Mar 2027 unless renewed in writing.
+
+6. Notice
+Either party may terminate this agreement by giving 1 month prior notice in writing.
+
+7. Rent
+Monthly rent of ₹45,000 is payable on or before the 5th of each calendar month.
+
+8. Use
+The premises shall be used solely for residential purposes as a 1BHK flat.
