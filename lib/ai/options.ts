@@ -1,12 +1,14 @@
 /**
  * Options orchestration: escalation → RERA (always) → retrieval → one LLM call.
+ * Escalation hard-stops after RERA/regime with a canned step (no LLM).
  * Complexity: O(C · K + N · d + T) for escalation keywords, corpus, tokens.
- * At most two LLM round-trips (initial + one stricter retry).
+ * At most two LLM round-trips (initial + one stricter retry) when not escalated.
  */
 
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { type ClarityLanguageModel } from "@/lib/ai/groq";
+import { escalationOptionsSteps } from "@/lib/ai/escalation-response";
 import {
   citationOutputSchema,
   escapeXmlAttr,
@@ -304,9 +306,6 @@ export async function runOptions(
     };
   }
 
-  const resolved = resolveClarityModel(options.model);
-  if (!resolved.ok) return resolved;
-
   const escalate = options.escalate ?? escalationGuard;
   const detect = options.detect ?? detectConflictsAndGaps;
   const lookup = options.lookup ?? lookupStatute;
@@ -325,6 +324,26 @@ export async function runOptions(
 
   const regime = stateLawStatus(options.session.facts.state, "residential_rent");
   const regimeDto = toRegimeDto(regime);
+
+  // Hard stop: banner + canned step only — no retrieval / LLM DIY advice.
+  if (escalation) {
+    return {
+      ok: true,
+      options: {
+        escalation: true,
+        reraChecks,
+        steps: escalationOptionsSteps(),
+        regime: regimeDto,
+      },
+      usage: {},
+      retried: false,
+      retrievedCount: 0,
+    };
+  }
+
+  const resolved = resolveClarityModel(options.model);
+  if (!resolved.ok) return resolved;
+
   const stateCode =
     regime.stateCode === "UNKNOWN" ? undefined : regime.stateCode;
 

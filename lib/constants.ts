@@ -44,7 +44,13 @@ export const MAX_CLAUSE_CHARS_FOR_LLM = 2_000;
 export const MAX_SIMPLIFY_CLAUSES = 80;
 
 /** Approx output tokens budgeted per clause for maxOutputTokens. */
-export const SIMPLIFY_TOKENS_PER_CLAUSE = 120;
+export const SIMPLIFY_TOKENS_PER_CLAUSE = 160;
+
+/**
+ * Extra maxOutputTokens for reasoning models (e.g. gpt-oss) that spend
+ * reasoning tokens against the same completion budget as JSON text.
+ */
+export const SIMPLIFY_REASONING_HEADROOM = 768;
 
 /** Floor for maxOutputTokens on a simplify call. */
 export const SIMPLIFY_MIN_OUTPUT_TOKENS = 256;

@@ -103,6 +103,12 @@ describe("simplifyMaxOutputTokens", () => {
     expect(simplifyMaxOutputTokens(1)).toBeGreaterThanOrEqual(256);
     expect(simplifyMaxOutputTokens(100)).toBeLessThanOrEqual(8192);
   });
+
+  it("includes reasoning headroom for typical lease sizes", () => {
+    // 7 clauses × 160 + 768 = 1888 — enough for gpt-oss reasoning + JSON.
+    expect(simplifyMaxOutputTokens(7)).toBeGreaterThanOrEqual(910);
+    expect(simplifyMaxOutputTokens(7)).toBe(7 * 160 + 768);
+  });
 });
 
 describe("alignSimplifiedItems", () => {

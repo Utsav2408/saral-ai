@@ -26,10 +26,31 @@ const INDIAN_STATES = [
 const MONTHS =
   "Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?";
 
+/** Day with optional ordinal; month name with optional comma before year. */
 const DATE_PATTERN = new RegExp(
-  `\\b(\\d{1,2}\\s+(?:${MONTHS})\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})\\b`,
+  `\\b(\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTHS}),?\\s+\\d{4}|\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})\\b`,
   "i",
 );
+
+const AMOUNT = "([\\d,]+(?:\\.\\d{1,2})?)";
+const CURRENCY = "(?:INR|Rs\\.?|₹)";
+/** Optional Indian-style trailing "/-" after an amount. */
+const AMOUNT_SUFFIX = "\\s*/?\\s*-?";
+
+const WORD_NUMBERS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+};
 
 /**
  * Regex-based fact extraction from lease text.
@@ -79,9 +100,33 @@ export function extractFacts(text: string): ExtractedFacts {
 function extractDeposit(
   text: string,
 ): { amount: number; currency: string } | undefined {
+  // Prefer security-deposit context so license fee / rent amounts do not match.
+  const money = CURRENCY + "\\s*" + AMOUNT + AMOUNT_SUFFIX;
   const patterns = [
-    /(?:security\s+deposit|deposit|earnest\s+money)\s*(?:of|amount|:)?\s*(?:is\s*)?(?:INR|Rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)/i,
-    /(?:INR|Rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)\s*(?:as\s+)?(?:security\s+)?deposit/i,
+    // Label then amount within a short window (covers "Security Deposit: … sum of ₹…").
+    new RegExp(
+      "(?:security\\s+deposit|earnest\\s+money)[\\s\\S]{0,250}?" + money,
+      "i",
+    ),
+    // "sum of ₹…" then later "security deposit".
+    new RegExp(
+      "sum\\s+of\\s*" + money + "[\\s\\S]{0,150}?security\\s+deposit",
+      "i",
+    ),
+    // Amount then (optional prose) security deposit.
+    new RegExp(money + "[\\s\\S]{0,120}?security\\s+deposit", "i"),
+    // Tight legacy forms (sample lease).
+    new RegExp(
+      "(?:security\\s+deposit|deposit|earnest\\s+money)\\s*(?:of|amount|:)?\\s*(?:is\\s*)?" +
+        CURRENCY +
+        "\\s*" +
+        AMOUNT,
+      "i",
+    ),
+    new RegExp(
+      CURRENCY + "\\s*" + AMOUNT + "\\s*(?:as\\s+)?(?:security\\s+)?deposit",
+      "i",
+    ),
   ];
 
   for (const pattern of patterns) {
@@ -113,6 +158,17 @@ function extractDatedField(text: string, prefixes: RegExp[]): string | undefined
 }
 
 function extractNotice(text: string): string | undefined {
+  // "one (1) calendar month's prior written notice" / "one (1) calendar month's notice in writing"
+  const wordForm = text.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d+)\s*(?:\(\s*(\d+)\s*\))?\s*(?:calendar\s+)?(months?|days?)\s*['’]?s?\s+(?:prior\s+(?:written\s+)?)?notice\b/i,
+  );
+  if (wordForm) {
+    const n = resolveNoticeCount(wordForm[1]!, wordForm[2]);
+    if (n != null) {
+      return `${n} ${normalizeUnit(wordForm[3]!)}`;
+    }
+  }
+
   const match = text.match(
     /(\d+)\s*(days?|months?)\s*(?:['’]?\s*)?(?:prior\s+)?notice/i,
   );
@@ -126,6 +182,22 @@ function extractNotice(text: string): string | undefined {
     return `${alt[1]} ${normalizeUnit(alt[2]!)}`;
   }
   return `${match[1]} ${normalizeUnit(match[2]!)}`;
+}
+
+function resolveNoticeCount(
+  wordOrDigit: string,
+  parenDigit: string | undefined,
+): number | undefined {
+  if (parenDigit) {
+    const n = Number.parseInt(parenDigit, 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+  const lower = wordOrDigit.toLowerCase();
+  if (/^\d+$/.test(lower)) {
+    const n = Number.parseInt(lower, 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+  return WORD_NUMBERS[lower];
 }
 
 function extractState(text: string): string | undefined {
@@ -146,5 +218,9 @@ function normalizeUnit(unit: string): string {
 }
 
 function normalizeDate(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim();
+  return raw
+    .replace(/(?<=\d)(st|nd|rd|th)\b/gi, "")
+    .replace(/,/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

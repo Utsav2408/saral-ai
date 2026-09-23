@@ -104,17 +104,8 @@ describe("runOptions", () => {
           {
             id: "step-1",
             title: "Speak with a lawyer",
-            body: "Because of escalation signals, seek qualified help about your Maharashtra lease and deposit of 150000.",
-            citations: [
-              { id: "mh-mrca-s15", label: "MRCA" },
-              { id: "lease:c-2", label: "Deposit clause" },
-            ],
-          },
-          {
-            id: "step-2",
-            title: "Keep records",
-            body: "Save written copies of notices and payments under your lease.",
-            citations: [{ id: "lease:c-5", label: "Notice" }],
+            body: "Because of escalation signals, seek qualified help.",
+            citations: [],
           },
         ],
       },
@@ -138,11 +129,37 @@ describe("runOptions", () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
     if (result.ok) {
       expect(result.options.escalation).toBe(true);
       expect(result.options.reraChecks.length).toBeGreaterThan(0);
-      expect(result.options.steps.length).toBeGreaterThanOrEqual(1);
+      expect(result.options.steps).toHaveLength(1);
+      expect(result.options.steps[0]?.title).toMatch(/qualified legal/i);
+      expect(result.retrievedCount).toBe(0);
     }
+  });
+
+  it("hard-stops without requiring GROQ when escalation fires", async () => {
+    const prev = process.env.GROQ_API_KEY;
+    delete process.env.GROQ_API_KEY;
+    const generate = vi.fn();
+    const result = await runOptions({
+      session: baseSession({
+        clauses: [
+          {
+            id: "c-1",
+            index: 1,
+            text: "The signature was forged and a case is in rent court.",
+          },
+        ],
+      }),
+      generate: generate as never,
+      detect: () => [],
+    });
+    expect(result.ok).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+    if (result.ok) expect(result.options.escalation).toBe(true);
+    if (prev) process.env.GROQ_API_KEY = prev;
   });
 
   it("returns NO_RETRIEVAL when lookup empty", async () => {

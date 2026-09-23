@@ -18,6 +18,7 @@ import {
   type LlmUsage,
 } from "@/lib/ai/llm-shared";
 import { enrichCitations, validateCitations } from "@/lib/ai/validate-citations";
+import { ESCALATION_CHAT_REPLY } from "@/lib/ai/escalation-response";
 import {
   CHAT_HISTORY_WINDOW,
   CHAT_MAX_OUTPUT_TOKENS,
@@ -31,6 +32,10 @@ import {
   type LawCategory,
   type RegimeResult,
 } from "@/lib/tools/state-law-status";
+import {
+  escalationGuardFromTexts,
+  type EscalationGuardResult,
+} from "@/lib/tools/escalation-guard";
 import { lookupStatute } from "@/lib/tools/lookup-statute";
 import { withLocaleSystemPrompt } from "@/lib/i18n/ai-locale";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/locale";
@@ -60,6 +65,8 @@ type ChatSuccess = {
   retrievedCount: number;
   usage: LlmUsage;
   retried: boolean;
+  /** True when Escalation Guard short-circuited the LLM. */
+  escalation?: boolean;
 };
 
 type ChatFailureCode =
@@ -90,6 +97,8 @@ export type RunChatArgs = {
   generate?: typeof generateText;
   lookup?: typeof lookupStatute;
   category?: LawCategory;
+  /** Inject escalation scan for tests. */
+  escalateText?: (texts: readonly string[]) => EscalationGuardResult;
 };
 
 const SYSTEM_BASE = `You are Clarity, a careful assistant that helps people understand their residential lease.
@@ -276,11 +285,32 @@ export async function runChatTurn(
     };
   }
 
+  const category = options.category ?? "residential_rent";
+  const regime = stateLawStatus(options.session.facts.state, category);
+
+  const escalateText = options.escalateText ?? escalationGuardFromTexts;
+  const esc = escalateText([message]);
+  if (esc.triggered || options.session.escalation) {
+    const userMsg: ChatMessage = { role: "user", content: message };
+    const assistantMsg: ChatMessage = {
+      role: "assistant",
+      content: ESCALATION_CHAT_REPLY,
+    };
+    return {
+      ok: true,
+      reply: assistantMsg,
+      messages: appendMessages(options.session.messages, userMsg, assistantMsg),
+      regime,
+      retrievedCount: 0,
+      usage: {},
+      retried: false,
+      escalation: true,
+    };
+  }
+
   const resolved = resolveClarityModel(options.model);
   if (!resolved.ok) return resolved;
 
-  const category = options.category ?? "residential_rent";
-  const regime = stateLawStatus(options.session.facts.state, category);
   const lookup = options.lookup ?? lookupStatute;
   const stateCode =
     regime.stateCode === "UNKNOWN" ? undefined : regime.stateCode;

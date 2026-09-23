@@ -113,6 +113,7 @@ export async function POST(
 
         const updated = sessionStore.update(token, {
           messages: result.messages,
+          ...(result.escalation ? { escalation: true } : {}),
         });
 
         safeLog({

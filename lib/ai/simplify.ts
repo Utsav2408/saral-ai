@@ -22,6 +22,7 @@ import {
   MAX_SIMPLIFY_CLAUSES,
   SIMPLIFY_MAX_OUTPUT_TOKENS,
   SIMPLIFY_MIN_OUTPUT_TOKENS,
+  SIMPLIFY_REASONING_HEADROOM,
   SIMPLIFY_TOKENS_PER_CLAUSE,
 } from "@/lib/constants";
 import {
@@ -125,7 +126,8 @@ export function buildSimplifyPrompt(
  * Complexity: O(1).
  */
 export function simplifyMaxOutputTokens(clauseCount: number): number {
-  const estimated = clauseCount * SIMPLIFY_TOKENS_PER_CLAUSE;
+  const estimated =
+    clauseCount * SIMPLIFY_TOKENS_PER_CLAUSE + SIMPLIFY_REASONING_HEADROOM;
   return Math.min(
     SIMPLIFY_MAX_OUTPUT_TOKENS,
     Math.max(SIMPLIFY_MIN_OUTPUT_TOKENS, estimated),

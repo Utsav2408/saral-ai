@@ -19,9 +19,12 @@ export function parseClauses(text: string): Clause[] {
   const segments =
     numbered.length >= 2 ? numbered : splitParagraphs(normalized);
 
-  const capped = segments.slice(0, MAX_CLAUSES);
-  return capped.map((segment, i) => {
-    const trimmed = segment.trim();
+  const usable = segments
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0 && !isPlaceholderClause(segment));
+
+  const capped = usable.slice(0, MAX_CLAUSES);
+  return capped.map((trimmed, i) => {
     const heading = detectHeading(trimmed);
     return {
       id: `c-${i + 1}`,
@@ -30,6 +33,12 @@ export function parseClauses(text: string): Clause[] {
       text: trimmed,
     };
   });
+}
+
+/** Witness / signature lines that are only underscores. */
+function isPlaceholderClause(text: string): boolean {
+  const compact = text.replace(/\s+/g, "");
+  return compact.length > 0 && /^_+$/.test(compact);
 }
 
 /**

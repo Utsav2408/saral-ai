@@ -29,10 +29,14 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(LocaleProvider, null, children);
 }
 
-afterEach(() => {
+afterEach(async () => {
   sessionStorage.clear();
   replace.mockReset();
   fetchActivityOnce.mockReset();
+  const { clearActivityInFlightForTests } = await import(
+    "@/lib/client/use-activity-load"
+  );
+  clearActivityInFlightForTests();
 });
 
 describe("useActivityLoad", () => {
@@ -79,6 +83,50 @@ describe("useActivityLoad", () => {
         body: { locale: "en" },
       }),
     );
+  });
+
+  it("dedupes concurrent mounts onto one fetchActivityOnce call", async () => {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, "a".repeat(43));
+    let resolveFetch!: (value: unknown) => void;
+    fetchActivityOnce.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    const { useActivityLoad } = await import("@/lib/client/use-activity-load");
+    const first = renderHook(() => useActivityLoad("options", "fallback"), {
+      wrapper,
+    });
+    const second = renderHook(() => useActivityLoad("options", "fallback"), {
+      wrapper,
+    });
+
+    expect(fetchActivityOnce).toHaveBeenCalledTimes(1);
+
+    resolveFetch({
+      ok: true,
+      data: {
+        token: "a".repeat(43),
+        title: "Lease",
+        escalation: false,
+        reraChecks: [],
+        steps: [],
+        regime: {
+          state: "Maharashtra",
+          category: "residential_rent",
+          code: "rent_control",
+          label: "MRCA",
+        },
+        cached: false,
+      },
+    });
+
+    await waitFor(() => {
+      expect(first.result.current.loading).toBe(false);
+      expect(second.result.current.loading).toBe(false);
+    });
+    expect(fetchActivityOnce).toHaveBeenCalledTimes(1);
   });
 
   it("clears token and redirects on expired session", async () => {

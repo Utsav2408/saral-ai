@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   ESCALATION_KEYWORDS,
   escalationGuard,
+  escalationGuardFromTexts,
+  scanEscalationText,
 } from "@/lib/tools/escalation-guard";
 import type { Clause } from "@/types/session";
 
 function clause(text: string): Clause {
   return { id: "c-1", index: 1, text };
 }
+
+const DEMO_CHAT_MESSAGE = `My landlord showed me a notarized letter saying I agreed to a rent increase last
+  year, but I never signed anything — I think the signature on it was forged. He's
+  also already filed a case against me in the local rent court over this. What should
+  I do?`;
 
 describe("escalationGuard", () => {
   it("does not trigger on ordinary lease language", () => {
@@ -49,6 +56,19 @@ describe("escalationGuard", () => {
       clause("Common courtyard access is shared with other tenants."),
     ]);
     expect(result.triggered).toBe(false);
+  });
+
+  it("triggers on demo chat forgery + rent court message", () => {
+    const result = scanEscalationText(DEMO_CHAT_MESSAGE);
+    expect(result.triggered).toBe(true);
+    expect(result.matchedTermCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("escalationGuardFromTexts matches filed a case", () => {
+    const result = escalationGuardFromTexts([
+      "He already filed a case in the local rent court.",
+    ]);
+    expect(result.triggered).toBe(true);
   });
 
   it("keyword list is bounded and non-empty", () => {

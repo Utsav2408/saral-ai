@@ -2,7 +2,7 @@
  * Escalation Guard — keyword MVP for criminal-adjacent / active-litigation terms.
  * Deliberately simple and conservative (prefer false positive over silent DIY advice).
  *
- * Complexity: O(C · K · L) for C clauses, K fixed keywords, L scanned chars per clause.
+ * Complexity: O(T · K · L) for T texts, K fixed keywords, L scanned chars per text.
  * Never log matched term strings — only matchedTermCount.
  */
 
@@ -35,6 +35,9 @@ export const ESCALATION_KEYWORDS: readonly string[] = [
   "litigation pending",
   "active litigation",
   "writ petition",
+  "filed a case",
+  "file a case",
+  "rent court",
 ] as const;
 
 export type EscalationGuardResult = {
@@ -63,17 +66,26 @@ const COMPILED = ESCALATION_KEYWORDS.map((k) => ({
 }));
 
 /**
- * Scan clause text for escalation keywords.
+ * Scan a single text blob for escalation keywords (bounded length).
  */
-export function escalationGuard(clauses: Clause[]): EscalationGuardResult {
+export function scanEscalationText(raw: string): EscalationGuardResult {
+  return escalationGuardFromTexts([raw]);
+}
+
+/**
+ * Scan one or more text blobs; counts unique keyword hits across all texts.
+ */
+export function escalationGuardFromTexts(
+  texts: readonly string[],
+): EscalationGuardResult {
   let matchedTermCount = 0;
   const hitKeys = new Set<string>();
 
-  for (const clause of clauses) {
+  for (const raw of texts) {
     const text =
-      clause.text.length > MAX_ESCALATION_SCAN_CHARS
-        ? clause.text.slice(0, MAX_ESCALATION_SCAN_CHARS)
-        : clause.text;
+      raw.length > MAX_ESCALATION_SCAN_CHARS
+        ? raw.slice(0, MAX_ESCALATION_SCAN_CHARS)
+        : raw;
     for (const { key, pattern } of COMPILED) {
       if (hitKeys.has(key)) continue;
       if (pattern.test(text)) {
@@ -87,4 +99,11 @@ export function escalationGuard(clauses: Clause[]): EscalationGuardResult {
     triggered: matchedTermCount > 0,
     matchedTermCount,
   };
+}
+
+/**
+ * Scan clause text for escalation keywords.
+ */
+export function escalationGuard(clauses: Clause[]): EscalationGuardResult {
+  return escalationGuardFromTexts(clauses.map((c) => c.text));
 }

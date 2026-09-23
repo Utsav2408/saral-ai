@@ -238,6 +238,26 @@ describe("runChatTurn", () => {
     if (!result.ok) expect(result.code).toBe("MESSAGE_TOO_LONG");
   });
 
+  it("hard-stops on forgery / rent court chat without calling the LLM", async () => {
+    const generate = vi.fn();
+    const lookup = vi.fn();
+    const result = await runChatTurn({
+      session: baseSession(),
+      message:
+        "I think the signature on it was forged. He's already filed a case against me in the local rent court. What should I do?",
+      generate,
+      lookup,
+    });
+    expect(result.ok).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+    expect(lookup).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(result.escalation).toBe(true);
+      expect(result.reply.content).toMatch(/qualified lawyer/i);
+      expect(result.retrievedCount).toBe(0);
+    }
+  });
+
   it("maps rate-limit errors from the LLM", async () => {
     process.env.GROQ_API_KEY = "test-key";
     const { APICallError } = await import("ai");

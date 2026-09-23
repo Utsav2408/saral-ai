@@ -38,4 +38,16 @@ describe("parseClauses", () => {
     const clauses = parseClauses(text);
     expect(clauses[0]?.heading).toBe("Deposit");
   });
+
+  it("drops underscore-only witness signature lines", () => {
+    const text = `1. Real content about the security deposit here.
+
+WITNESSES:
+1. _______________________
+2. _______________________
+`;
+    const clauses = parseClauses(text);
+    expect(clauses.some((c) => /_{5,}/.test(c.text))).toBe(false);
+    expect(clauses.some((c) => c.text.includes("Real content"))).toBe(true);
+  });
 });
