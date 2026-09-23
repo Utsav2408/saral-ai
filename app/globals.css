@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+:root {
+  --canvas: #f3efe6;
+  --ink: #1a1f1c;
+  --ink-muted: #5c655f;
+  --primary: #1b4d3e;
+  --primary-soft: #e4efe9;
+  --card: #ffffff;
+  --danger-soft: #f8e8e6;
+  --border: #d9d3c7;
+  --ring: #1b4d3e;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-primary: var(--primary);
+  --color-primary-soft: var(--primary-soft);
+  --color-card: var(--card);
+  --color-danger-soft: var(--danger-soft);
+  --color-border: var(--border);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
