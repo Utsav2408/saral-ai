@@ -1,13 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useEffectEvent } from "react";
+import {
+  ActivityError,
+  ActivityHeader,
+  ActivityLoading,
+} from "@/components/ActivityChrome";
+import { CitationPills } from "@/components/CitationPills";
 import { ErrorPanel } from "@/components/ErrorPanel";
 import { mapApiErrorFromBody } from "@/lib/api/map-api-error";
 import { sessionExpiredHomeHref } from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
-import { safeCitationHref } from "@/lib/chat/safe-citation-url";
 import type { ChatMessage, ChatResponse, SessionPublic } from "@/types/session";
 
 const SUGGESTIONS = [
@@ -152,25 +156,11 @@ export default function ChatPage() {
   }
 
   if (loading && !loadError) {
-    return (
-      <main
-        id="main"
-        className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
-      >
-        Opening chat…
-      </main>
-    );
+    return <ActivityLoading>Opening chat…</ActivityLoading>;
   }
 
   if (loadError) {
-    return (
-      <main
-        id="main"
-        className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16"
-      >
-        <ErrorPanel message={loadError} showHomeLink showOverviewLink />
-      </main>
-    );
+    return <ActivityError message={loadError} showHomeLink />;
   }
 
   return (
@@ -178,21 +168,7 @@ export default function ChatPage() {
       id="main"
       className="mx-auto flex min-h-full w-full max-w-md flex-col px-5 pb-4 pt-6"
     >
-      <header className="flex items-start gap-3">
-        <Link
-          href="/overview"
-          aria-label="Back to overview"
-          className="mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-primary-soft"
-        >
-          <ChevronLeft />
-        </Link>
-        <div className="min-w-0 flex-1">
-          <h1 className="font-display text-3xl font-bold tracking-tight text-ink">
-            Chat
-          </h1>
-          <p className="mt-1 truncate text-sm text-ink-muted">{title}</p>
-        </div>
-      </header>
+      <ActivityHeader title="Chat" subtitle={title} large />
 
       <div className="mt-6 flex flex-1 flex-col gap-3 overflow-y-auto">
         {messages.map((m, i) => (
@@ -276,52 +252,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       >
         <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
         {message.citations && message.citations.length > 0 ? (
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {message.citations.map((c) => {
-              const href = safeCitationHref(c.sourceUrl);
-              const className =
-                "rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium text-ink-muted";
-              return (
-                <li key={c.id}>
-                  {href ? (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`${className} underline-offset-2 hover:underline`}
-                    >
-                      {c.label}
-                    </a>
-                  ) : (
-                    <span className={className}>{c.label}</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <CitationPills
+            citations={message.citations}
+            pillClassName="rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium text-ink-muted"
+          />
         ) : null}
       </div>
     </div>
-  );
-}
-
-function ChevronLeft() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M12.5 4.5L7 10l5.5 5.5"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 

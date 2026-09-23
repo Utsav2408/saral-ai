@@ -4,26 +4,23 @@
  * At most two LLM round-trips (initial + one stricter retry).
  */
 
-import {
-  APICallError,
-  generateText,
-  NoObjectGeneratedError,
-  NoOutputGeneratedError,
-  Output,
-} from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
+import { type ClarityLanguageModel } from "@/lib/ai/groq";
 import {
-  createSimplifyModel,
-  requireGroqApiKey,
-  simplifyModel,
-  type SimplifyLanguageModel,
-} from "@/lib/ai/groq";
-import { validateCitations } from "@/lib/ai/validate-citations";
+  citationOutputSchema,
+  escapeXmlAttr,
+  formatFactsForPrompt,
+  mapLlmError,
+  packClausesXml,
+  resolveClarityModel,
+  usageFromResult,
+  type LlmUsage,
+} from "@/lib/ai/llm-shared";
+import { enrichCitations, validateCitations } from "@/lib/ai/validate-citations";
 import {
   CHAT_HISTORY_WINDOW,
   CHAT_MAX_OUTPUT_TOKENS,
-  MAX_CHAT_CLAUSE_CHARS,
-  MAX_CHAT_CLAUSES_IN_PROMPT,
   MAX_CHAT_MESSAGE_CHARS,
   MAX_CHAT_MESSAGES,
   STATUTE_TOP_K,
@@ -36,49 +33,34 @@ import {
 } from "@/lib/tools/state-law-status";
 import { lookupStatute } from "@/lib/tools/lookup-statute";
 import type {
-  ChatCitation,
   ChatMessage,
   Clause,
   ExtractedFacts,
   Session,
 } from "@/types/session";
 
-const citationSchema = z.object({
-  id: z
-    .string()
-    .describe(
-      "Retrieved chunk id (e.g. mh-mrca-s15) or lease clause id as lease:c-1",
-    ),
-  label: z.string().describe("Short citation pill label"),
-});
-
 const chatOutputSchema = z.object({
   answer: z
     .string()
     .describe("Plain-language answer grounded in lease + retrieved statutes"),
   citations: z
-    .array(citationSchema)
+    .array(citationOutputSchema)
     .describe("Citations that support the answer; ids must be from the provided lists"),
 });
 
-export type ChatLlmOutput = z.infer<typeof chatOutputSchema>;
+type ChatLlmOutput = z.infer<typeof chatOutputSchema>;
 
-export type ChatUsage = {
-  promptTokens?: number;
-  completionTokens?: number;
-};
-
-export type ChatSuccess = {
+type ChatSuccess = {
   ok: true;
   reply: ChatMessage;
   messages: ChatMessage[];
   regime: RegimeResult;
   retrievedCount: number;
-  usage: ChatUsage;
+  usage: LlmUsage;
   retried: boolean;
 };
 
-export type ChatFailureCode =
+type ChatFailureCode =
   | "AI_NOT_CONFIGURED"
   | "EMPTY_MESSAGE"
   | "MESSAGE_TOO_LONG"
@@ -87,19 +69,20 @@ export type ChatFailureCode =
   | "CHAT_FAILED"
   | "RATE_LIMITED";
 
-export type ChatFailure = {
+type ChatFailure = {
   ok: false;
   code: ChatFailureCode;
   message: string;
-  usage?: ChatUsage;
+  usage?: LlmUsage;
 };
 
-export type ChatResult = ChatSuccess | ChatFailure;
+/** Discriminated result from {@link runChatTurn}. */
+export type RunChatResult = ChatSuccess | ChatFailure;
 
-export type RunChatOptions = {
+export type RunChatArgs = {
   session: Session;
   message: string;
-  model?: SimplifyLanguageModel;
+  model?: ClarityLanguageModel;
   generate?: typeof generateText;
   lookup?: typeof lookupStatute;
   category?: LawCategory;
@@ -139,33 +122,24 @@ export function buildSystemPrompt(args: {
   clauses: Clause[];
   hits: StatuteHit[];
 }): string {
-  const factsLines = [
-    args.facts.state ? `state=${args.facts.state}` : null,
-    args.facts.depositAmount != null
-      ? `deposit=${args.facts.depositAmount}`
-      : null,
-    args.facts.noticePeriod ? `notice=${args.facts.noticePeriod}` : null,
-    args.facts.leaseStart ? `leaseStart=${args.facts.leaseStart}` : null,
-    args.facts.leaseEnd ? `leaseEnd=${args.facts.leaseEnd}` : null,
-  ]
-    .filter(Boolean)
-    .join("; ");
+  const factsLines = formatFactsForPrompt(args.facts, [
+    "state",
+    "deposit",
+    "notice",
+    "leaseStart",
+    "leaseEnd",
+  ]);
 
-  const clausePack = args.clauses
-    .slice(0, MAX_CHAT_CLAUSES_IN_PROMPT)
-    .map((c) => {
-      const body =
-        c.text.length > MAX_CHAT_CLAUSE_CHARS
-          ? `${c.text.slice(0, MAX_CHAT_CLAUSE_CHARS)}…`
-          : c.text;
-      return `<lease-clause id="${escapeXml(c.id)}" index="${c.index}">\n${body}\n</lease-clause>`;
-    })
-    .join("\n");
+  const clausePack = packClausesXml(args.clauses, {
+    tag: "lease-clause",
+    joinWith: "\n",
+    includeIndex: true,
+  });
 
   const statutePack = args.hits
     .map(
       (h) =>
-        `<statute id="${escapeXml(h.id)}" label="${escapeXml(h.citationLabel)}" section="${escapeXml(h.section)}">\n${h.text}\n</statute>`,
+        `<statute id="${escapeXmlAttr(h.id)}" label="${escapeXmlAttr(h.citationLabel)}" section="${escapeXmlAttr(h.section)}">\n${h.text}\n</statute>`,
     )
     .join("\n");
 
@@ -179,13 +153,6 @@ ${statutePack || "(none)"}
 
 Lease clauses (cite as lease:c-N using these ids):
 ${clausePack || "(none)"}`;
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;");
 }
 
 /**
@@ -229,58 +196,15 @@ export function appendMessages(
   return [...existing, user, assistant].slice(-MAX_CHAT_MESSAGES);
 }
 
-function usageFromResult(usage: {
-  inputTokens?: number | null;
-  outputTokens?: number | null;
-}): ChatUsage {
-  return {
-    promptTokens: usage.inputTokens ?? undefined,
-    completionTokens: usage.outputTokens ?? undefined,
-  };
-}
-
-function mapLlmError(err: unknown): ChatFailure {
-  if (err instanceof Error && err.name === "AiNotConfiguredError") {
-    return {
-      ok: false,
-      code: "AI_NOT_CONFIGURED",
-      message: "AI is temporarily unavailable. Try again shortly.",
-    };
-  }
-  if (APICallError.isInstance(err) && err.statusCode === 429) {
-    return {
-      ok: false,
-      code: "RATE_LIMITED",
-      message: "Too many requests. Try again shortly.",
-    };
-  }
-  if (
-    NoObjectGeneratedError.isInstance(err) ||
-    NoOutputGeneratedError.isInstance(err) ||
-    APICallError.isInstance(err)
-  ) {
-    return {
-      ok: false,
-      code: "CHAT_FAILED",
-      message: "Could not answer that question. Please try again.",
-    };
-  }
-  return {
-    ok: false,
-    code: "CHAT_FAILED",
-    message: "Could not answer that question. Please try again.",
-  };
-}
-
 type GenerateFn = typeof generateText;
 
 async function callChatLlm(args: {
-  model: SimplifyLanguageModel;
+  model: ClarityLanguageModel;
   generate: GenerateFn;
   messages: { role: "system" | "user" | "assistant"; content: string }[];
   systemExtra?: string;
 }): Promise<
-  | { ok: true; output: ChatLlmOutput; usage: ChatUsage }
+  | { ok: true; output: ChatLlmOutput; usage: LlmUsage }
   | ChatFailure
 > {
   try {
@@ -314,45 +238,20 @@ async function callChatLlm(args: {
       usage: usageFromResult(result.usage ?? {}),
     };
   } catch (err) {
-    return mapLlmError(err);
+    return mapLlmError(
+      err,
+      "CHAT_FAILED",
+      "Could not answer that question. Please try again.",
+    );
   }
-}
-
-function enrichCitations(
-  citations: ChatCitation[],
-  hits: StatuteHit[],
-  clauses: Clause[],
-): ChatCitation[] {
-  const byHit = new Map(hits.map((h) => [h.id, h]));
-  const byClause = new Map(clauses.map((c) => [c.id, c]));
-  return citations.map((c) => {
-    if (c.id.startsWith("lease:")) {
-      const clauseId = c.id.slice("lease:".length);
-      const clause = byClause.get(clauseId);
-      return {
-        id: c.id,
-        label:
-          c.label ||
-          (clause
-            ? `Your lease · Clause ${clause.index}`
-            : `Your lease · ${clauseId}`),
-      };
-    }
-    const hit = byHit.get(c.id);
-    return {
-      id: c.id,
-      label: c.label || hit?.citationLabel || c.id,
-      sourceUrl: hit?.sourceUrl,
-    };
-  });
 }
 
 /**
  * Run one chat turn for a session.
  */
 export async function runChatTurn(
-  options: RunChatOptions,
-): Promise<ChatResult> {
+  options: RunChatArgs,
+): Promise<RunChatResult> {
   const message = normalizeUserMessage(options.message);
   if (!message) {
     return {
@@ -369,15 +268,8 @@ export async function runChatTurn(
     };
   }
 
-  try {
-    requireGroqApiKey();
-  } catch {
-    return {
-      ok: false,
-      code: "AI_NOT_CONFIGURED",
-      message: "AI is temporarily unavailable. Try again shortly.",
-    };
-  }
+  const resolved = resolveClarityModel(options.model);
+  if (!resolved.ok) return resolved;
 
   const category = options.category ?? "residential_rent";
   const regime = stateLawStatus(options.session.facts.state, category);
@@ -408,7 +300,7 @@ export async function runChatTurn(
   });
   const messages = buildChatMessages(options.session, message, system);
 
-  const model = options.model ?? simplifyModel;
+  const { model } = resolved;
   const generate = options.generate ?? generateText;
 
   let llm = await callChatLlm({ model, generate, messages });
@@ -481,6 +373,3 @@ export async function runChatTurn(
     retried,
   };
 }
-
-/** Re-export model factory for tests that inject keys. */
-export { createSimplifyModel as createChatModel };

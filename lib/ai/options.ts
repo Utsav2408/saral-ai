@@ -4,23 +4,25 @@
  * At most two LLM round-trips (initial + one stricter retry).
  */
 
-import {
-  APICallError,
-  generateText,
-  NoObjectGeneratedError,
-  NoOutputGeneratedError,
-  Output,
-} from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
+import { type ClarityLanguageModel } from "@/lib/ai/groq";
 import {
-  requireGroqApiKey,
-  simplifyModel,
-  type SimplifyLanguageModel,
-} from "@/lib/ai/groq";
-import { validateCitations } from "@/lib/ai/validate-citations";
+  citationOutputSchema,
+  escapeXmlAttr,
+  formatFactsForPrompt,
+  mapLlmError,
+  packClausesXml,
+  resolveClarityModel,
+  truncatePromptText,
+  usageFromResult,
+  type LlmUsage,
+} from "@/lib/ai/llm-shared";
 import {
-  MAX_CHAT_CLAUSE_CHARS,
-  MAX_CHAT_CLAUSES_IN_PROMPT,
+  enrichCitations,
+  validateCitations,
+} from "@/lib/ai/validate-citations";
+import {
   MAX_CHUNK_CHARS_FOR_LLM,
   OPTIONS_MAX_OUTPUT_TOKENS,
   STATUTE_TOP_K,
@@ -35,21 +37,16 @@ import {
 } from "@/lib/tools/rera-grievance-check";
 import {
   stateLawStatus,
+  toRegimeDto,
   type RegimeResult,
 } from "@/lib/tools/state-law-status";
 import type {
-  ChatCitation,
   ChatRegimeDto,
   OptionsResult,
   OptionsStep,
   ReraCheckResult,
   Session,
 } from "@/types/session";
-
-const citationSchema = z.object({
-  id: z.string(),
-  label: z.string(),
-});
 
 const optionsOutputSchema = z.object({
   steps: z
@@ -58,28 +55,23 @@ const optionsOutputSchema = z.object({
         id: z.string(),
         title: z.string(),
         body: z.string(),
-        citations: z.array(citationSchema).optional(),
+        citations: z.array(citationOutputSchema).optional(),
       }),
     )
     .describe("2–5 practical next-step options for the tenant"),
 });
 
-export type OptionsLlmOutput = z.infer<typeof optionsOutputSchema>;
+type OptionsLlmOutput = z.infer<typeof optionsOutputSchema>;
 
-export type OptionsUsage = {
-  promptTokens?: number;
-  completionTokens?: number;
-};
-
-export type OptionsSuccess = {
+type OptionsSuccess = {
   ok: true;
   options: OptionsResult;
-  usage: OptionsUsage;
+  usage: LlmUsage;
   retried: boolean;
   retrievedCount: number;
 };
 
-export type OptionsFailureCode =
+type OptionsFailureCode =
   | "AI_NOT_CONFIGURED"
   | "NO_CLAUSES"
   | "NO_RETRIEVAL"
@@ -87,22 +79,23 @@ export type OptionsFailureCode =
   | "OPTIONS_FAILED"
   | "RATE_LIMITED";
 
-export type OptionsFailure = {
+type OptionsFailure = {
   ok: false;
   code: OptionsFailureCode;
   message: string;
-  usage?: OptionsUsage;
+  usage?: LlmUsage;
   /** Partial escalation / RERA for route to still persist escalation flag. */
   escalation?: boolean;
   reraChecks?: ReraCheckResult[];
   regime?: ChatRegimeDto;
 };
 
-export type OptionsResultUnion = OptionsSuccess | OptionsFailure;
+/** Discriminated result from {@link runOptions}. */
+export type RunOptionsResult = OptionsSuccess | OptionsFailure;
 
-export type RunOptionsOptions = {
+export type RunOptionsArgs = {
   session: Session;
-  model?: SimplifyLanguageModel;
+  model?: ClarityLanguageModel;
   generate?: typeof generateText;
   lookup?: typeof lookupStatute;
   detect?: typeof detectConflictsAndGaps;
@@ -123,62 +116,6 @@ Rules:
 const STRICT_ADDENDUM = `
 
 STRICT RETRY: Citation validation failed. Cite only ids from the retrieved statute list and lease clause list. Include citations when making legal or lease claims.`;
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}…`;
-}
-
-function toRegimeDto(regime: RegimeResult): ChatRegimeDto {
-  return {
-    state: regime.state,
-    category: regime.category,
-    code: regime.code,
-    label: regime.label,
-  };
-}
-
-function usageFromResult(usage: {
-  inputTokens?: number;
-  outputTokens?: number;
-  promptTokens?: number;
-  completionTokens?: number;
-}): OptionsUsage {
-  return {
-    promptTokens: usage.inputTokens ?? usage.promptTokens,
-    completionTokens: usage.outputTokens ?? usage.completionTokens,
-  };
-}
-
-function mapLlmError(err: unknown): OptionsFailure {
-  if (APICallError.isInstance(err) && err.statusCode === 429) {
-    return {
-      ok: false,
-      code: "RATE_LIMITED",
-      message: "Too many requests. Try again shortly.",
-    };
-  }
-  if (
-    NoObjectGeneratedError.isInstance(err) ||
-    NoOutputGeneratedError.isInstance(err) ||
-    APICallError.isInstance(err)
-  ) {
-    return {
-      ok: false,
-      code: "OPTIONS_FAILED",
-      message: "Could not build options. Please try again.",
-    };
-  }
-  return {
-    ok: false,
-    code: "OPTIONS_FAILED",
-    message: "Could not build options. Please try again.",
-  };
-}
 
 /**
  * Build retrieval query from flags + state.
@@ -203,39 +140,31 @@ export function buildOptionsPrompt(args: {
   const flagXml = args.flags
     .map(
       (f) =>
-        `<flag id="${escapeAttr(f.id)}" rule="${escapeAttr(f.ruleId)}" severity="${f.severity}" />`,
+        `<flag id="${escapeXmlAttr(f.id)}" rule="${escapeXmlAttr(f.ruleId)}" severity="${f.severity}" />`,
     )
     .join("\n");
 
   const reraXml = args.reraChecks
     .map(
       (r) =>
-        `<rera dispute="${escapeAttr(r.disputeType)}" applicable="${r.applicable}">${escapeAttr(r.explanation)}</rera>`,
+        `<rera dispute="${escapeXmlAttr(r.disputeType)}" applicable="${r.applicable}">${escapeXmlAttr(r.explanation)}</rera>`,
     )
     .join("\n");
 
   const hitXml = args.hits
     .map((h) => {
-      const body = truncate(h.text, MAX_CHUNK_CHARS_FOR_LLM);
-      return `<statute id="${escapeAttr(h.id)}" label="${escapeAttr(h.citationLabel)}">\n${body}\n</statute>`;
+      const body = truncatePromptText(h.text, MAX_CHUNK_CHARS_FOR_LLM);
+      return `<statute id="${escapeXmlAttr(h.id)}" label="${escapeXmlAttr(h.citationLabel)}">\n${body}\n</statute>`;
     })
     .join("\n\n");
 
-  const clauseXml = args.clauses
-    .slice(0, MAX_CHAT_CLAUSES_IN_PROMPT)
-    .map((c) => {
-      const body = truncate(c.text, MAX_CHAT_CLAUSE_CHARS);
-      return `<clause id="${escapeAttr(c.id)}">\n${body}\n</clause>`;
-    })
-    .join("\n\n");
+  const clauseXml = packClausesXml(args.clauses);
 
-  const factsLine = [
-    args.facts.state ? `state=${args.facts.state}` : null,
-    args.facts.depositAmount != null ? `deposit=${args.facts.depositAmount}` : null,
-    args.facts.noticePeriod ? `notice=${args.facts.noticePeriod}` : null,
-  ]
-    .filter(Boolean)
-    .join("; ");
+  const factsLine = formatFactsForPrompt(args.facts, [
+    "state",
+    "deposit",
+    "notice",
+  ]);
 
   return `escalation=${args.escalation}
 regime=${args.regime.label} (${args.regime.code})
@@ -263,13 +192,13 @@ Return practical next-step options as JSON.`;
 type GenerateFn = typeof generateText;
 
 async function callOptionsLlm(args: {
-  model: SimplifyLanguageModel;
+  model: ClarityLanguageModel;
   generate: GenerateFn;
   prompt: string;
   escalation: boolean;
   systemExtra?: string;
 }): Promise<
-  | { ok: true; output: OptionsLlmOutput; usage: OptionsUsage }
+  | { ok: true; output: OptionsLlmOutput; usage: LlmUsage }
   | OptionsFailure
 > {
   try {
@@ -304,41 +233,23 @@ async function callOptionsLlm(args: {
       usage: usageFromResult(result.usage ?? {}),
     };
   } catch (err) {
-    return mapLlmError(err);
+    return mapLlmError(
+      err,
+      "OPTIONS_FAILED",
+      "Could not build options. Please try again.",
+    );
   }
-}
-
-function enrichStepCitations(
-  citations: ChatCitation[],
-  hits: StatuteHit[],
-  leaseClauseIds: Set<string>,
-): ChatCitation[] {
-  const byHit = new Map(hits.map((h) => [h.id, h]));
-  return citations.map((c) => {
-    if (c.id.startsWith("lease:")) {
-      const clauseId = c.id.slice("lease:".length);
-      return {
-        id: c.id,
-        label: c.label || (leaseClauseIds.has(clauseId) ? `Your lease · ${clauseId}` : c.id),
-      };
-    }
-    const hit = byHit.get(c.id);
-    return {
-      id: c.id,
-      label: c.label || hit?.citationLabel || c.id,
-      sourceUrl: hit?.sourceUrl,
-    };
-  });
 }
 
 function validateOptionsSteps(
   output: OptionsLlmOutput,
   hits: StatuteHit[],
-  leaseClauseIds: Set<string>,
+  clauses: Session["clauses"],
 ):
   | { ok: true; steps: OptionsStep[] }
   | { ok: false } {
   const retrievedIds = new Set(hits.map((h) => h.id));
+  const leaseClauseIds = new Set(clauses.map((c) => c.id));
   const steps: OptionsStep[] = [];
 
   for (const raw of output.steps ?? []) {
@@ -366,11 +277,7 @@ function validateOptionsSteps(
       id: raw.id?.trim() || `step-${steps.length + 1}`,
       title,
       body,
-      citations: enrichStepCitations(
-        validated.citations,
-        hits,
-        leaseClauseIds,
-      ),
+      citations: enrichCitations(validated.citations, hits, clauses),
     });
   }
 
@@ -385,8 +292,8 @@ function validateOptionsSteps(
  * Run Options for a session.
  */
 export async function runOptions(
-  options: RunOptionsOptions,
-): Promise<OptionsResultUnion> {
+  options: RunOptionsArgs,
+): Promise<RunOptionsResult> {
   if (!options.session.clauses.length) {
     return {
       ok: false,
@@ -395,15 +302,8 @@ export async function runOptions(
     };
   }
 
-  try {
-    requireGroqApiKey();
-  } catch {
-    return {
-      ok: false,
-      code: "AI_NOT_CONFIGURED",
-      message: "AI is temporarily unavailable. Try again shortly.",
-    };
-  }
+  const resolved = resolveClarityModel(options.model);
+  if (!resolved.ok) return resolved;
 
   const escalate = options.escalate ?? escalationGuard;
   const detect = options.detect ?? detectConflictsAndGaps;
@@ -458,9 +358,8 @@ export async function runOptions(
     facts: options.session.facts,
   });
 
-  const model = options.model ?? simplifyModel;
+  const { model } = resolved;
   const generate = options.generate ?? generateText;
-  const leaseClauseIds = new Set(options.session.clauses.map((c) => c.id));
 
   let llm = await callOptionsLlm({
     model,
@@ -479,7 +378,11 @@ export async function runOptions(
     };
   }
 
-  let validated = validateOptionsSteps(llm.output, hits, leaseClauseIds);
+  let validated = validateOptionsSteps(
+    llm.output,
+    hits,
+    options.session.clauses,
+  );
   if (!validated.ok) {
     retried = true;
     llm = await callOptionsLlm({
@@ -497,7 +400,11 @@ export async function runOptions(
         regime: regimeDto,
       };
     }
-    validated = validateOptionsSteps(llm.output, hits, leaseClauseIds);
+    validated = validateOptionsSteps(
+      llm.output,
+      hits,
+      options.session.clauses,
+    );
   }
 
   if (!validated.ok) {

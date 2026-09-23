@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { MAX_RERA_DISPUTE_TYPES } from "@/lib/constants";
 import type { ReraCheckResult } from "@/types/session";
 
-export type ReraTableEntry = {
+type ReraTableEntry = {
   applicable: boolean;
   explanation: string;
   citeChunkId?: string;

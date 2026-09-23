@@ -3,10 +3,7 @@
  * Complexity: O(1) network round-trips (at most 2).
  */
 
-import {
-  mapApiErrorFromBody,
-  SESSION_EXPIRED_MESSAGE,
-} from "@/lib/api/map-api-error";
+import { mapApiErrorFromBody } from "@/lib/api/map-api-error";
 
 const RATE_LIMIT_RETRY_MS = 3_000;
 
@@ -61,11 +58,7 @@ export async function fetchActivityOnce<T>(
   return first;
 }
 
-/**
- * Clear session token and return home URL with expired reason.
- */
+/** Home URL with expired reason (caller clears the session token). */
 export function sessionExpiredHomeHref(): string {
   return "/?reason=expired";
 }
-
-export { SESSION_EXPIRED_MESSAGE };

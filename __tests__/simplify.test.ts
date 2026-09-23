@@ -6,14 +6,10 @@ import {
 } from "ai";
 import {
   AiNotConfiguredError,
-  createSimplifyModel,
+  createClarityModel,
   requireGroqApiKey,
 } from "@/lib/ai/groq";
-import {
-  clearSimplifyLocks,
-  releaseSimplifyLock,
-  tryAcquireSimplifyLock,
-} from "@/lib/ai/simplify-lock";
+import { simplifyLock } from "@/lib/ai/token-lock";
 import {
   alignSimplifiedItems,
   buildSimplifyPrompt,
@@ -45,7 +41,7 @@ const clauses: Clause[] = [
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  clearSimplifyLocks();
+  simplifyLock.clear();
   vi.useRealTimers();
 });
 
@@ -174,7 +170,7 @@ describe("runEntityChecks", () => {
   });
 });
 
-describe("requireGroqApiKey / createSimplifyModel", () => {
+describe("requireGroqApiKey / createClarityModel", () => {
   it("throws AiNotConfiguredError when key missing", () => {
     vi.stubEnv("GROQ_API_KEY", "");
     expect(() => requireGroqApiKey()).toThrow(AiNotConfiguredError);
@@ -185,15 +181,15 @@ describe("requireGroqApiKey / createSimplifyModel", () => {
     expect(requireGroqApiKey()).toBe("gsk_test_key");
   });
 
-  it("createSimplifyModel builds a model with explicit key", () => {
-    const model = createSimplifyModel({ apiKey: "gsk_test_key" });
+  it("createClarityModel builds a model with explicit key", () => {
+    const model = createClarityModel({ apiKey: "gsk_test_key" });
     expect(model).toBeTruthy();
     expect(typeof model).toBe("object");
   });
 
-  it("createSimplifyModel accepts custom fetch", () => {
+  it("createClarityModel accepts custom fetch", () => {
     const fetchFn = vi.fn() as unknown as typeof globalThis.fetch;
-    const model = createSimplifyModel({
+    const model = createClarityModel({
       apiKey: "gsk_test_key",
       fetch: fetchFn,
     });
@@ -201,17 +197,17 @@ describe("requireGroqApiKey / createSimplifyModel", () => {
   });
 });
 
-describe("simplify-lock", () => {
+describe("token-lock (simplify)", () => {
   it("blocks concurrent acquire and cooldown", () => {
     vi.useFakeTimers();
     const token = "a".repeat(43);
-    expect(tryAcquireSimplifyLock(token).ok).toBe(true);
-    expect(tryAcquireSimplifyLock(token).ok).toBe(false);
-    releaseSimplifyLock(token);
-    expect(tryAcquireSimplifyLock(token).ok).toBe(false);
+    expect(simplifyLock.tryAcquire(token).ok).toBe(true);
+    expect(simplifyLock.tryAcquire(token).ok).toBe(false);
+    simplifyLock.release(token);
+    expect(simplifyLock.tryAcquire(token).ok).toBe(false);
     vi.advanceTimersByTime(SIMPLIFY_COOLDOWN_MS + 1);
-    expect(tryAcquireSimplifyLock(token).ok).toBe(true);
-    releaseSimplifyLock(token);
+    expect(simplifyLock.tryAcquire(token).ok).toBe(true);
+    simplifyLock.release(token);
   });
 });
 

@@ -4,21 +4,19 @@
  * at most two LLM round-trips (initial + one stricter retry).
  */
 
-import {
-  APICallError,
-  generateText,
-  NoObjectGeneratedError,
-  NoOutputGeneratedError,
-  Output,
-} from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import { entityCheck } from "@/lib/ai/entity-check";
+import { type ClarityLanguageModel } from "@/lib/ai/groq";
 import {
-  createSimplifyModel,
-  requireGroqApiKey,
-  simplifyModel,
-  type SimplifyLanguageModel,
-} from "@/lib/ai/groq";
+  mapLlmError,
+  mergeUsage,
+  packClausesXml,
+  resolveClarityModel,
+  truncatePromptText,
+  usageFromResult,
+  type LlmUsage,
+} from "@/lib/ai/llm-shared";
 import {
   MAX_CLAUSE_CHARS_FOR_LLM,
   MAX_SIMPLIFY_CLAUSES,
@@ -39,21 +37,16 @@ const simplifiedElementSchema = z.object({
     ),
 });
 
-export type SimplifyLlmItem = z.infer<typeof simplifiedElementSchema>;
+type SimplifyLlmItem = z.infer<typeof simplifiedElementSchema>;
 
-export type SimplifyUsage = {
-  promptTokens?: number;
-  completionTokens?: number;
-};
-
-export type SimplifySuccess = {
+type SimplifySuccess = {
   ok: true;
   simplified: SimplifiedClause[];
-  usage: SimplifyUsage;
+  usage: LlmUsage;
   retried: boolean;
 };
 
-export type SimplifyFailureCode =
+type SimplifyFailureCode =
   | "AI_NOT_CONFIGURED"
   | "NO_CLAUSES"
   | "TOO_MANY_CLAUSES"
@@ -62,20 +55,21 @@ export type SimplifyFailureCode =
   | "RATE_LIMITED"
   | "ID_MISMATCH";
 
-export type SimplifyFailure = {
+type SimplifyFailure = {
   ok: false;
   code: SimplifyFailureCode;
   message: string;
   inventedCount?: number;
-  usage?: SimplifyUsage;
+  usage?: LlmUsage;
 };
 
-export type SimplifyResult = SimplifySuccess | SimplifyFailure;
+/** Discriminated result from {@link runSimplify}. */
+export type RunSimplifyResult = SimplifySuccess | SimplifyFailure;
 
-export type RunSimplifyOptions = {
+export type RunSimplifyArgs = {
   clauses: Clause[];
-  /** Override model (tests). Defaults to env-backed simplifyModel. */
-  model?: SimplifyLanguageModel;
+  /** Override model (tests). Defaults to env-backed clarityModel. */
+  model?: ClarityLanguageModel;
   /** Inject generateText for unit tests. */
   generate?: typeof generateText;
 };
@@ -99,10 +93,7 @@ STRICT RETRY: Your previous paraphrase invented numbers or names. Copy every amo
  * Complexity: O(1) slice.
  */
 export function truncateClauseText(text: string): string {
-  if (text.length <= MAX_CLAUSE_CHARS_FOR_LLM) {
-    return text;
-  }
-  return `${text.slice(0, MAX_CLAUSE_CHARS_FOR_LLM)}…`;
+  return truncatePromptText(text, MAX_CLAUSE_CHARS_FOR_LLM);
 }
 
 /**
@@ -110,16 +101,13 @@ export function truncateClauseText(text: string): string {
  * Complexity: O(C · L) for C clauses of length L.
  */
 export function buildSimplifyPrompt(clauses: Clause[]): string {
-  const blocks = clauses.map((c) => {
-    const body = truncateClauseText(c.text);
-    const heading = c.heading ? ` heading="${escapeAttr(c.heading)}"` : "";
-    return `<clause id="${escapeAttr(c.id)}" index="${c.index}"${heading}>\n${body}\n</clause>`;
+  const blocks = packClausesXml(clauses, {
+    maxClauses: clauses.length,
+    maxChars: MAX_CLAUSE_CHARS_FOR_LLM,
+    includeIndex: true,
+    includeHeading: true,
   });
-  return `Paraphrase each of the following ${clauses.length} lease clause(s). Return JSON with one element per clause.\n\n${blocks.join("\n\n")}`;
-}
-
-function escapeAttr(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return `Paraphrase each of the following ${clauses.length} lease clause(s). Return JSON with one element per clause.\n\n${blocks}`;
 }
 
 /**
@@ -132,16 +120,6 @@ export function simplifyMaxOutputTokens(clauseCount: number): number {
     SIMPLIFY_MAX_OUTPUT_TOKENS,
     Math.max(SIMPLIFY_MIN_OUTPUT_TOKENS, estimated),
   );
-}
-
-function usageFromResult(usage: {
-  inputTokens?: number | null;
-  outputTokens?: number | null;
-}): SimplifyUsage {
-  return {
-    promptTokens: usage.inputTokens ?? undefined,
-    completionTokens: usage.outputTokens ?? undefined,
-  };
 }
 
 /**
@@ -200,12 +178,12 @@ export function runEntityChecks(
 type GenerateFn = typeof generateText;
 
 async function callSimplifyLlm(args: {
-  model: SimplifyLanguageModel;
+  model: ClarityLanguageModel;
   generate: GenerateFn;
   clauses: Clause[];
   system: string;
 }): Promise<
-  | { ok: true; items: SimplifyLlmItem[]; usage: SimplifyUsage }
+  | { ok: true; items: SimplifyLlmItem[]; usage: LlmUsage }
   | SimplifyFailure
 > {
   const count = args.clauses.length;
@@ -240,47 +218,12 @@ async function callSimplifyLlm(args: {
       usage: usageFromResult(result.usage ?? {}),
     };
   } catch (err) {
-    return mapLlmError(err);
+    return mapLlmError(
+      err,
+      "SIMPLIFY_FAILED",
+      "Could not simplify this document.",
+    );
   }
-}
-
-function mapLlmError(err: unknown): SimplifyFailure {
-  if (err instanceof Error && err.name === "AiNotConfiguredError") {
-    return {
-      ok: false,
-      code: "AI_NOT_CONFIGURED",
-      message: "AI is temporarily unavailable. Try again shortly.",
-    };
-  }
-  if (APICallError.isInstance(err) && err.statusCode === 429) {
-    return {
-      ok: false,
-      code: "RATE_LIMITED",
-      message: "Too many requests. Try again shortly.",
-    };
-  }
-  if (
-    NoObjectGeneratedError.isInstance(err) ||
-    NoOutputGeneratedError.isInstance(err)
-  ) {
-    return {
-      ok: false,
-      code: "SIMPLIFY_FAILED",
-      message: "Could not simplify this document.",
-    };
-  }
-  if (APICallError.isInstance(err)) {
-    return {
-      ok: false,
-      code: "SIMPLIFY_FAILED",
-      message: "Could not simplify this document.",
-    };
-  }
-  return {
-    ok: false,
-    code: "SIMPLIFY_FAILED",
-    message: "Could not simplify this document.",
-  };
 }
 
 /**
@@ -288,8 +231,8 @@ function mapLlmError(err: unknown): SimplifyFailure {
  * Does not touch the session store — caller caches on success.
  */
 export async function runSimplify(
-  options: RunSimplifyOptions,
-): Promise<SimplifyResult> {
+  options: RunSimplifyArgs,
+): Promise<RunSimplifyResult> {
   const { clauses } = options;
 
   if (clauses.length === 0) {
@@ -307,22 +250,9 @@ export async function runSimplify(
     };
   }
 
-  let model: SimplifyLanguageModel;
-  try {
-    if (options.model) {
-      model = options.model;
-    } else {
-      requireGroqApiKey();
-      model = simplifyModel;
-    }
-  } catch {
-    return {
-      ok: false,
-      code: "AI_NOT_CONFIGURED",
-      message: "AI is temporarily unavailable. Try again shortly.",
-    };
-  }
-
+  const resolved = resolveClarityModel(options.model);
+  if (!resolved.ok) return resolved;
+  const { model } = resolved;
   const generate = options.generate ?? generateText;
 
   const first = await callSimplifyLlm({
@@ -400,16 +330,3 @@ export async function runSimplify(
     retried: true,
   };
 }
-
-function mergeUsage(a?: SimplifyUsage, b?: SimplifyUsage): SimplifyUsage {
-  const promptTokens = (a?.promptTokens ?? 0) + (b?.promptTokens ?? 0);
-  const completionTokens =
-    (a?.completionTokens ?? 0) + (b?.completionTokens ?? 0);
-  return {
-    promptTokens: promptTokens > 0 ? promptTokens : undefined,
-    completionTokens: completionTokens > 0 ? completionTokens : undefined,
-  };
-}
-
-/** Re-export for tests that need a custom model with injected fetch. */
-export { createSimplifyModel };

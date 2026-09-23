@@ -4,23 +4,23 @@
  * At most two LLM round-trips (initial + one stricter retry).
  */
 
-import {
-  APICallError,
-  generateText,
-  NoObjectGeneratedError,
-  NoOutputGeneratedError,
-  Output,
-} from "ai";
+import { generateText, Output } from "ai";
 import { z } from "zod";
 import { extractNumbers } from "@/lib/ai/entity-check";
+import { type ClarityLanguageModel } from "@/lib/ai/groq";
 import {
-  requireGroqApiKey,
-  simplifyModel,
-  type SimplifyLanguageModel,
-} from "@/lib/ai/groq";
+  escapeXmlAttr,
+  formatFactsForPrompt,
+  mapLlmError,
+  packClausesXml,
+  resolveClarityModel,
+  truncatePromptText,
+  usageFromResult,
+  type LlmUsage,
+} from "@/lib/ai/llm-shared";
 import {
-  MAX_CHAT_CLAUSE_CHARS,
-  MAX_CHAT_CLAUSES_IN_PROMPT,
+  MAX_PROMPT_CLAUSE_CHARS,
+  MAX_PROMPT_CLAUSES,
   MAX_SUMMARY_CHECKLIST,
   SUMMARY_MAX_OUTPUT_TOKENS,
 } from "@/lib/constants";
@@ -63,40 +63,36 @@ const summaryOutputSchema = z.object({
     .describe("Ordered actionable checklist; at most 12 items"),
 });
 
-export type SummaryLlmOutput = z.infer<typeof summaryOutputSchema>;
+type SummaryLlmOutput = z.infer<typeof summaryOutputSchema>;
 
-export type SummaryUsage = {
-  promptTokens?: number;
-  completionTokens?: number;
-};
-
-export type SummarySuccess = {
+type SummarySuccess = {
   ok: true;
   summary: SummaryResult;
-  usage: SummaryUsage;
+  usage: LlmUsage;
   retried: boolean;
 };
 
-export type SummaryFailureCode =
+type SummaryFailureCode =
   | "AI_NOT_CONFIGURED"
   | "NO_CLAUSES"
   | "VALIDATION_FAILED"
   | "SUMMARY_FAILED"
   | "RATE_LIMITED";
 
-export type SummaryFailure = {
+type SummaryFailure = {
   ok: false;
   code: SummaryFailureCode;
   message: string;
   inventedCount?: number;
-  usage?: SummaryUsage;
+  usage?: LlmUsage;
 };
 
-export type SummaryResultUnion = SummarySuccess | SummaryFailure;
+/** Discriminated result from {@link runSummary}. */
+export type RunSummaryResult = SummarySuccess | SummaryFailure;
 
-export type RunSummaryOptions = {
+export type RunSummaryArgs = {
   session: Session;
-  model?: SimplifyLanguageModel;
+  model?: ClarityLanguageModel;
   generate?: typeof generateText;
   /** Inject conflict detection for tests. */
   detect?: typeof detectConflictsAndGaps;
@@ -115,53 +111,6 @@ Rules:
 const STRICT_ADDENDUM = `
 
 STRICT RETRY: Your previous output failed validation. Use only provided flag ids. Do not invent numbers or names absent from the facts/clauses. Include exactly one description per flag.`;
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}…`;
-}
-
-function usageFromResult(usage: {
-  inputTokens?: number;
-  outputTokens?: number;
-  promptTokens?: number;
-  completionTokens?: number;
-}): SummaryUsage {
-  return {
-    promptTokens: usage.inputTokens ?? usage.promptTokens,
-    completionTokens: usage.outputTokens ?? usage.completionTokens,
-  };
-}
-
-function mapLlmError(err: unknown): SummaryFailure {
-  if (APICallError.isInstance(err) && err.statusCode === 429) {
-    return {
-      ok: false,
-      code: "RATE_LIMITED",
-      message: "Too many requests. Try again shortly.",
-    };
-  }
-  if (
-    NoObjectGeneratedError.isInstance(err) ||
-    NoOutputGeneratedError.isInstance(err) ||
-    APICallError.isInstance(err)
-  ) {
-    return {
-      ok: false,
-      code: "SUMMARY_FAILED",
-      message: "Could not build a summary. Please try again.",
-    };
-  }
-  return {
-    ok: false,
-    code: "SUMMARY_FAILED",
-    message: "Could not build a summary. Please try again.",
-  };
-}
 
 /**
  * Build the grounding string used for entity_check (facts + clause excerpts).
@@ -182,8 +131,8 @@ export function buildSummaryGrounding(
   ].filter(Boolean);
   const flagParts = flags.map((f) => `${f.id} ${f.ruleId} ${f.summaryKey}`);
   const clauseParts = clauses
-    .slice(0, MAX_CHAT_CLAUSES_IN_PROMPT)
-    .map((c) => truncate(c.text, MAX_CHAT_CLAUSE_CHARS));
+    .slice(0, MAX_PROMPT_CLAUSES)
+    .map((c) => truncatePromptText(c.text, MAX_PROMPT_CLAUSE_CHARS));
   return [...factParts, ...flagParts, ...clauseParts].join("\n");
 }
 
@@ -283,26 +232,18 @@ export function buildSummaryPrompt(
   clauses: Clause[],
   flags: ConflictFlag[],
 ): string {
-  const factsBlock = [
-    facts.state ? `state=${facts.state}` : null,
-    facts.depositAmount != null ? `deposit=${facts.depositAmount}` : null,
-    facts.noticePeriod ? `notice=${facts.noticePeriod}` : null,
-    facts.leaseStart ? `leaseStart=${facts.leaseStart}` : null,
-    facts.leaseEnd ? `leaseEnd=${facts.leaseEnd}` : null,
-    facts.propertyType ? `propertyType=${facts.propertyType}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const factsBlock = formatFactsForPrompt(
+    facts,
+    ["state", "deposit", "notice", "leaseStart", "leaseEnd", "propertyType"],
+    "\n",
+  );
 
   const flagBlocks = flags.map(
     (f) =>
-      `<flag id="${escapeAttr(f.id)}" rule="${escapeAttr(f.ruleId)}" severity="${f.severity}" key="${escapeAttr(f.summaryKey)}" />`,
+      `<flag id="${escapeXmlAttr(f.id)}" rule="${escapeXmlAttr(f.ruleId)}" severity="${f.severity}" key="${escapeXmlAttr(f.summaryKey)}" />`,
   );
 
-  const clauseBlocks = clauses.slice(0, MAX_CHAT_CLAUSES_IN_PROMPT).map((c) => {
-    const body = truncate(c.text, MAX_CHAT_CLAUSE_CHARS);
-    return `<clause id="${escapeAttr(c.id)}" index="${c.index}">\n${body}\n</clause>`;
-  });
+  const clauseBlocks = packClausesXml(clauses, { includeIndex: true });
 
   return `Produce overview, flagDescriptions, and checklist for this lease.
 
@@ -315,19 +256,19 @@ ${flagBlocks.join("\n") || "(no flags)"}
 </flags>
 
 <clauses>
-${clauseBlocks.join("\n\n")}
+${clauseBlocks}
 </clauses>`;
 }
 
 type GenerateFn = typeof generateText;
 
 async function callSummaryLlm(args: {
-  model: SimplifyLanguageModel;
+  model: ClarityLanguageModel;
   generate: GenerateFn;
   prompt: string;
   systemExtra?: string;
 }): Promise<
-  | { ok: true; output: SummaryLlmOutput; usage: SummaryUsage }
+  | { ok: true; output: SummaryLlmOutput; usage: LlmUsage }
   | SummaryFailure
 > {
   try {
@@ -359,7 +300,11 @@ async function callSummaryLlm(args: {
       usage: usageFromResult(result.usage ?? {}),
     };
   } catch (err) {
-    return mapLlmError(err);
+    return mapLlmError(
+      err,
+      "SUMMARY_FAILED",
+      "Could not build a summary. Please try again.",
+    );
   }
 }
 
@@ -367,8 +312,8 @@ async function callSummaryLlm(args: {
  * Run Summary for a session (facts + conflict flags → checklist).
  */
 export async function runSummary(
-  options: RunSummaryOptions,
-): Promise<SummaryResultUnion> {
+  options: RunSummaryArgs,
+): Promise<RunSummaryResult> {
   if (!options.session.clauses.length) {
     return {
       ok: false,
@@ -377,15 +322,8 @@ export async function runSummary(
     };
   }
 
-  try {
-    requireGroqApiKey();
-  } catch {
-    return {
-      ok: false,
-      code: "AI_NOT_CONFIGURED",
-      message: "AI is temporarily unavailable. Try again shortly.",
-    };
-  }
+  const resolved = resolveClarityModel(options.model);
+  if (!resolved.ok) return resolved;
 
   const detect = options.detect ?? detectConflictsAndGaps;
   const flags = detect({
@@ -404,7 +342,7 @@ export async function runSummary(
     flags,
   );
 
-  const model = options.model ?? simplifyModel;
+  const { model } = resolved;
   const generate = options.generate ?? generateText;
 
   let llm = await callSummaryLlm({ model, generate, prompt });

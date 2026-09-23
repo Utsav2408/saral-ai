@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CorpusState } from "@/lib/corpus/types";
+import type { ChatRegimeDto } from "@/types/session";
 
 export type LawCategory = "residential_rent" | "rera_project";
 
@@ -81,6 +82,16 @@ export function stateLawStatus(
     label: entry.label,
     stateCode: entry.stateCode as CorpusState,
     known: true,
+  };
+}
+
+/** Public DTO for chat / options API responses (drops internal stateCode). */
+export function toRegimeDto(regime: RegimeResult): ChatRegimeDto {
+  return {
+    state: regime.state,
+    category: regime.category,
+    code: regime.code,
+    label: regime.label,
   };
 }
 

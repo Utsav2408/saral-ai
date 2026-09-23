@@ -14,7 +14,7 @@ import type {
   SummaryResult,
 } from "@/types/session";
 
-export type CreateSessionInput = {
+type CreateSessionInput = {
   title: string;
   sourceFilename: string;
   mimeType: string;
@@ -24,7 +24,7 @@ export type CreateSessionInput = {
 };
 
 /** Patchable fields for session updates (Simplify / Summary / Options cache). */
-export type SessionUpdatePatch = {
+type SessionUpdatePatch = {
   simplifiedClauses?: SimplifiedClause[];
   simplifyCachedAt?: number;
   messages?: Session["messages"];

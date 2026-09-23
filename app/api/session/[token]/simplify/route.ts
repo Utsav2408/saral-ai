@@ -4,30 +4,24 @@
  */
 
 import { NextResponse } from "next/server";
-import {
-  clearSimplifyLocks,
-  releaseSimplifyLock,
-  tryAcquireSimplifyLock,
-} from "@/lib/ai/simplify-lock";
 import { runSimplify } from "@/lib/ai/simplify";
-import { jsonError } from "@/lib/api/errors";
-import { INTERNAL_ERROR_MESSAGE } from "@/lib/api/map-api-error";
+import { simplifyLock } from "@/lib/ai/token-lock";
+import {
+  activityFailureResponse,
+  handleActivityRequest,
+  rateLimitedResponse,
+} from "@/lib/api/activity-route";
+import type { SessionRouteContext } from "@/lib/api/require-session";
+import { withTokenLock } from "@/lib/api/with-token-lock";
 import { safeLog } from "@/lib/logging/safe-log";
 import { sessionStore } from "@/lib/session/store";
 import type { SimplifyResponse } from "@/types/session";
 
 export const runtime = "nodejs";
 
-type RouteContext = {
-  params: Promise<{ token: string }>;
-};
-
 /** Exported for tests to reset in-process locks between cases. */
-export { clearSimplifyLocks };
+export const clearSimplifyLocks = simplifyLock.clear;
 
-/**
- * Build the public simplify DTO.
- */
 function toSimplifyResponse(
   token: string,
   title: string,
@@ -35,13 +29,7 @@ function toSimplifyResponse(
   simplifiedClauses: SimplifyResponse["simplifiedClauses"],
   cached: boolean,
 ): SimplifyResponse {
-  return {
-    token,
-    title,
-    clauses,
-    simplifiedClauses,
-    cached,
-  };
+  return { token, title, clauses, simplifiedClauses, cached };
 }
 
 /**
@@ -49,40 +37,11 @@ function toSimplifyResponse(
  */
 export async function POST(
   _request: Request,
-  context: RouteContext,
+  context: SessionRouteContext,
 ): Promise<
   NextResponse<SimplifyResponse | { error: { code: string; message: string } }>
 > {
-  const started = Date.now();
-  try {
-    const { token } = await context.params;
-
-    if (!sessionStore.isValidTokenFormat(token)) {
-      safeLog({
-        activity: "simplify",
-        ok: false,
-        code: "INVALID_TOKEN",
-        latencyMs: Date.now() - started,
-      });
-      return jsonError(400, "INVALID_TOKEN", "Invalid session token.");
-    }
-
-    const session = sessionStore.get(token);
-    if (!session) {
-      safeLog({
-        activity: "simplify",
-        ok: false,
-        code: "NOT_FOUND",
-        latencyMs: Date.now() - started,
-      });
-      return jsonError(
-        404,
-        "NOT_FOUND",
-        "Session not found or expired. Please upload your document again.",
-      );
-    }
-
-    // Cache hit — no Groq call, no lock needed
+  return handleActivityRequest("simplify", context, async ({ token, session, started }) => {
     if (session.simplifiedClauses && session.simplifiedClauses.length > 0) {
       safeLog({
         activity: "simplify",
@@ -103,88 +62,60 @@ export async function POST(
       );
     }
 
-    const lock = tryAcquireSimplifyLock(token);
-    if (!lock.ok) {
-      safeLog({
-        activity: "simplify",
-        ok: false,
-        code: "RATE_LIMITED",
-        clauseCount: session.clauses.length,
-        latencyMs: Date.now() - started,
-      });
-      return jsonError(
-        429,
-        "RATE_LIMITED",
-        "Simplify is already running or was just requested. Try again shortly.",
-      );
-    }
+    return withTokenLock({
+      tryAcquire: simplifyLock.tryAcquire,
+      release: simplifyLock.release,
+      token,
+      blocked: () =>
+        rateLimitedResponse(
+          "simplify",
+          started,
+          "Simplify is already running or was just requested. Try again shortly.",
+          { clauseCount: session.clauses.length },
+        ),
+      work: async () => {
+        const result = await runSimplify({ clauses: session.clauses });
 
-    try {
-      const result = await runSimplify({ clauses: session.clauses });
+        if (!result.ok) {
+          return activityFailureResponse(
+            "simplify",
+            started,
+            result.code,
+            result.message,
+            {
+              clauseCount: session.clauses.length,
+              inventedCount: result.inventedCount,
+              usage: result.usage,
+            },
+          );
+        }
 
-      if (!result.ok) {
-        const status =
-          result.code === "AI_NOT_CONFIGURED"
-            ? 503
-            : result.code === "RATE_LIMITED"
-              ? 429
-              : result.code === "ENTITY_CHECK_FAILED" ||
-                  result.code === "NO_CLAUSES" ||
-                  result.code === "TOO_MANY_CLAUSES"
-                ? 422
-                : 502;
+        const updated = sessionStore.update(token, {
+          simplifiedClauses: result.simplified,
+          simplifyCachedAt: Date.now(),
+        });
 
         safeLog({
           activity: "simplify",
-          ok: false,
-          code: result.code,
-          validated: false,
+          ok: true,
+          validated: true,
           cached: false,
           clauseCount: session.clauses.length,
-          inventedCount: result.inventedCount,
-          promptTokens: result.usage?.promptTokens,
-          completionTokens: result.usage?.completionTokens,
+          promptTokens: result.usage.promptTokens,
+          completionTokens: result.usage.completionTokens,
           latencyMs: Date.now() - started,
         });
 
-        return jsonError(status, result.code, result.message);
-      }
-
-      const updated = sessionStore.update(token, {
-        simplifiedClauses: result.simplified,
-        simplifyCachedAt: Date.now(),
-      });
-
-      safeLog({
-        activity: "simplify",
-        ok: true,
-        validated: true,
-        cached: false,
-        clauseCount: session.clauses.length,
-        promptTokens: result.usage.promptTokens,
-        completionTokens: result.usage.completionTokens,
-        latencyMs: Date.now() - started,
-      });
-
-      return NextResponse.json(
-        toSimplifyResponse(
-          token,
-          (updated ?? session).title,
-          (updated ?? session).clauses,
-          result.simplified,
-          false,
-        ),
-      );
-    } finally {
-      releaseSimplifyLock(token);
-    }
-  } catch {
-    safeLog({
-      activity: "simplify",
-      ok: false,
-      code: "INTERNAL",
-      latencyMs: Date.now() - started,
+        return NextResponse.json(
+          toSimplifyResponse(
+            token,
+            (updated ?? session).title,
+            (updated ?? session).clauses,
+            result.simplified,
+            false,
+          ),
+        );
+      },
     });
-    return jsonError(500, "INTERNAL", INTERNAL_ERROR_MESSAGE);
-  }
+  });
 }

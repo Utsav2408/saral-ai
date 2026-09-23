@@ -60,7 +60,7 @@ export interface SimplifiedClause {
 }
 
 /** Severity for a deterministic conflict / gap flag. */
-export type ConflictSeverity = "info" | "warning" | "critical";
+type ConflictSeverity = "info" | "warning" | "critical";
 
 /**
  * Rule-based conflict or gap detected before Summary / Options.

@@ -27,10 +27,8 @@ function fnv1a(str: string): number {
   return h >>> 0;
 }
 
-/**
- * Normalize text for embedding: lowercase, collapse whitespace.
- */
-export function normalizeForEmbed(text: string): string {
+/** Normalize text for embedding: lowercase, collapse whitespace. */
+function normalizeForEmbed(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 

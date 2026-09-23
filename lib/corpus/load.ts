@@ -10,10 +10,8 @@ import type { EmbeddedChunk, EmbeddingsFile } from "@/lib/corpus/types";
 
 let cached: EmbeddedChunk[] | null = null;
 
-/**
- * Root directory that embeddings paths must stay under (LFI guard).
- */
-export function corpusDataRoot(): string {
+/** Root directory that embeddings paths must stay under (LFI guard). */
+function corpusDataRoot(): string {
   return resolve(process.cwd(), "data", "corpus");
 }
 

@@ -1,5 +1,5 @@
 /**
- * Deterministic citation validation for Chat answers.
+ * Deterministic citation validation for Chat and Options answers.
  * Complexity: O(c) in citation count.
  */
 
@@ -84,4 +84,40 @@ export function validateCitations(
   }
 
   return { ok: true, citations: normalized };
+}
+
+/**
+ * Attach display labels / source URLs from retrieval hits and lease clauses.
+ * Complexity: O(c) in citation count.
+ */
+export function enrichCitations(
+  citations: ChatCitation[],
+  hits: { id: string; citationLabel: string; sourceUrl?: string }[],
+  clauses?: { id: string; index: number }[],
+): ChatCitation[] {
+  const byHit = new Map(hits.map((h) => [h.id, h]));
+  const byClause = clauses
+    ? new Map(clauses.map((c) => [c.id, c]))
+    : undefined;
+
+  return citations.map((c) => {
+    if (c.id.startsWith("lease:")) {
+      const clauseId = c.id.slice("lease:".length);
+      const clause = byClause?.get(clauseId);
+      return {
+        id: c.id,
+        label:
+          c.label ||
+          (clause
+            ? `Your lease · Clause ${clause.index}`
+            : `Your lease · ${clauseId}`),
+      };
+    }
+    const hit = byHit.get(c.id);
+    return {
+      id: c.id,
+      label: c.label || hit?.citationLabel || c.id,
+      sourceUrl: hit?.sourceUrl,
+    };
+  });
 }

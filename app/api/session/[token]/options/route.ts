@@ -4,26 +4,23 @@
  */
 
 import { NextResponse } from "next/server";
-import {
-  clearOptionsLocks,
-  releaseOptionsLock,
-  tryAcquireOptionsLock,
-} from "@/lib/ai/options-lock";
 import { runOptions } from "@/lib/ai/options";
-import { jsonError } from "@/lib/api/errors";
-import { INTERNAL_ERROR_MESSAGE } from "@/lib/api/map-api-error";
+import { optionsLock } from "@/lib/ai/token-lock";
+import {
+  activityFailureResponse,
+  handleActivityRequest,
+  rateLimitedResponse,
+} from "@/lib/api/activity-route";
+import type { SessionRouteContext } from "@/lib/api/require-session";
+import { withTokenLock } from "@/lib/api/with-token-lock";
 import { safeLog } from "@/lib/logging/safe-log";
 import { sessionStore } from "@/lib/session/store";
 import type { OptionsResponse, OptionsResult } from "@/types/session";
 
 export const runtime = "nodejs";
 
-type RouteContext = {
-  params: Promise<{ token: string }>;
-};
-
 /** Exported for tests to reset in-process locks between cases. */
-export { clearOptionsLocks };
+export const clearOptionsLocks = optionsLock.clear;
 
 function toOptionsResponse(
   token: string,
@@ -47,39 +44,11 @@ function toOptionsResponse(
  */
 export async function POST(
   _request: Request,
-  context: RouteContext,
+  context: SessionRouteContext,
 ): Promise<
   NextResponse<OptionsResponse | { error: { code: string; message: string } }>
 > {
-  const started = Date.now();
-  try {
-    const { token } = await context.params;
-
-    if (!sessionStore.isValidTokenFormat(token)) {
-      safeLog({
-        activity: "options",
-        ok: false,
-        code: "INVALID_TOKEN",
-        latencyMs: Date.now() - started,
-      });
-      return jsonError(400, "INVALID_TOKEN", "Invalid session token.");
-    }
-
-    const session = sessionStore.get(token);
-    if (!session) {
-      safeLog({
-        activity: "options",
-        ok: false,
-        code: "NOT_FOUND",
-        latencyMs: Date.now() - started,
-      });
-      return jsonError(
-        404,
-        "NOT_FOUND",
-        "Session not found or expired. Please upload your document again.",
-      );
-    }
-
+  return handleActivityRequest("options", context, async ({ token, session, started }) => {
     if (session.options) {
       safeLog({
         activity: "options",
@@ -100,95 +69,67 @@ export async function POST(
       );
     }
 
-    const lock = tryAcquireOptionsLock(token);
-    if (!lock.ok) {
-      safeLog({
-        activity: "options",
-        ok: false,
-        code: "RATE_LIMITED",
-        clauseCount: session.clauses.length,
-        latencyMs: Date.now() - started,
-      });
-      return jsonError(
-        429,
-        "RATE_LIMITED",
-        "Options is already running or was just requested. Try again shortly.",
-      );
-    }
+    return withTokenLock({
+      tryAcquire: optionsLock.tryAcquire,
+      release: optionsLock.release,
+      token,
+      blocked: () =>
+        rateLimitedResponse(
+          "options",
+          started,
+          "Options is already running or was just requested. Try again shortly.",
+          { clauseCount: session.clauses.length },
+        ),
+      work: async () => {
+        const result = await runOptions({ session });
 
-    try {
-      const result = await runOptions({ session });
+        // Persist sticky escalation even on failure when the guard ran.
+        if (result.ok === false && result.escalation) {
+          sessionStore.update(token, { escalation: true });
+        }
 
-      // Persist sticky escalation even on failure when the guard ran.
-      if (result.ok === false && result.escalation) {
-        sessionStore.update(token, { escalation: true });
-      }
+        if (!result.ok) {
+          return activityFailureResponse(
+            "options",
+            started,
+            result.code,
+            result.message,
+            {
+              clauseCount: session.clauses.length,
+              escalation: result.escalation ?? session.escalation,
+              usage: result.usage,
+            },
+          );
+        }
 
-      if (!result.ok) {
-        const status =
-          result.code === "AI_NOT_CONFIGURED"
-            ? 503
-            : result.code === "RATE_LIMITED"
-              ? 429
-              : result.code === "NO_CLAUSES" ||
-                  result.code === "VALIDATION_FAILED" ||
-                  result.code === "NO_RETRIEVAL"
-                ? 422
-                : 502;
+        const updated = sessionStore.update(token, {
+          options: result.options,
+          optionsCachedAt: Date.now(),
+          escalation: result.options.escalation,
+        });
 
         safeLog({
           activity: "options",
-          ok: false,
-          code: result.code,
-          validated: false,
+          ok: true,
+          validated: true,
           cached: false,
-          escalation: result.escalation ?? session.escalation,
+          escalation: result.options.escalation,
+          retrievedCount: result.retrievedCount,
           clauseCount: session.clauses.length,
-          promptTokens: result.usage?.promptTokens,
-          completionTokens: result.usage?.completionTokens,
+          promptTokens: result.usage.promptTokens,
+          completionTokens: result.usage.completionTokens,
           latencyMs: Date.now() - started,
         });
 
-        return jsonError(status, result.code, result.message);
-      }
-
-      const updated = sessionStore.update(token, {
-        options: result.options,
-        optionsCachedAt: Date.now(),
-        escalation: result.options.escalation,
-      });
-
-      safeLog({
-        activity: "options",
-        ok: true,
-        validated: true,
-        cached: false,
-        escalation: result.options.escalation,
-        retrievedCount: result.retrievedCount,
-        clauseCount: session.clauses.length,
-        promptTokens: result.usage.promptTokens,
-        completionTokens: result.usage.completionTokens,
-        latencyMs: Date.now() - started,
-      });
-
-      return NextResponse.json(
-        toOptionsResponse(
-          token,
-          (updated ?? session).title,
-          result.options,
-          false,
-        ),
-      );
-    } finally {
-      releaseOptionsLock(token);
-    }
-  } catch {
-    safeLog({
-      activity: "options",
-      ok: false,
-      code: "INTERNAL",
-      latencyMs: Date.now() - started,
+        return NextResponse.json(
+          toOptionsResponse(
+            token,
+            (updated ?? session).title,
+            result.options,
+            false,
+          ),
+        );
+      },
     });
-    return jsonError(500, "INTERNAL", INTERNAL_ERROR_MESSAGE);
-  }
+  });
 }

@@ -73,11 +73,14 @@ export const STATUTE_TOP_K = 4;
 /** Max characters of each retrieved chunk body put into the LLM prompt. */
 export const MAX_CHUNK_CHARS_FOR_LLM = 1_200;
 
-/** Max characters of each lease clause in durable chat context. */
-export const MAX_CHAT_CLAUSE_CHARS = 400;
+/**
+ * Max characters of each lease clause packed into GenAI prompts
+ * (chat durable context, summary grounding, options prompt).
+ */
+export const MAX_PROMPT_CLAUSE_CHARS = 400;
 
-/** Soft cap on clauses included in durable chat context. */
-export const MAX_CHAT_CLAUSES_IN_PROMPT = 40;
+/** Soft cap on clauses included in GenAI prompts across activities. */
+export const MAX_PROMPT_CLAUSES = 40;
 
 /** Chat completion max output tokens. */
 export const CHAT_MAX_OUTPUT_TOKENS = 1_024;

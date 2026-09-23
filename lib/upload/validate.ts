@@ -4,14 +4,14 @@ import {
   MAX_UPLOAD_BYTES,
 } from "@/lib/constants";
 
-export type UploadValidationOk = {
+type UploadValidationOk = {
   ok: true;
   mime: string;
   ext: string;
   filename: string;
 };
 
-export type UploadValidationErr = {
+type UploadValidationErr = {
   ok: false;
   code: string;
   message: string;

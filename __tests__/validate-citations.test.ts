@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  enrichCitations,
   normalizeCitationId,
   validateCitations,
 } from "@/lib/ai/validate-citations";
@@ -69,5 +70,27 @@ describe("validateCitations", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("empty_answer");
+  });
+});
+
+describe("enrichCitations", () => {
+  it("fills labels and source URLs from hits and clauses", () => {
+    const enriched = enrichCitations(
+      [
+        { id: "mh-mrca-s15", label: "" },
+        { id: "lease:c-1", label: "" },
+      ],
+      [
+        {
+          id: "mh-mrca-s15",
+          citationLabel: "MRCA §15",
+          sourceUrl: "https://www.indiacode.nic.in/example",
+        },
+      ],
+      [{ id: "c-1", index: 1 }],
+    );
+    expect(enriched[0]?.label).toBe("MRCA §15");
+    expect(enriched[0]?.sourceUrl).toContain("indiacode");
+    expect(enriched[1]?.label).toBe("Your lease · Clause 1");
   });
 });
