@@ -383,7 +383,7 @@ export async function runSummary(
     return {
       ok: false,
       code: "AI_NOT_CONFIGURED",
-      message: "AI is not configured. Set GROQ_API_KEY on the server.",
+      message: "AI is temporarily unavailable. Try again shortly.",
     };
   }
 

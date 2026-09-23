@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ErrorPanel } from "@/components/ErrorPanel";
+import { sessionExpiredHomeHref } from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import type { SessionPublic } from "@/types/session";
 
@@ -50,11 +52,7 @@ export default function OverviewPage() {
         if (cancelled) return;
         if (!res.ok || "error" in data) {
           sessionStorage.removeItem(SESSION_STORAGE_KEY);
-          setError(
-            "error" in data
-              ? data.error.message
-              : "Session expired. Please upload again.",
-          );
+          router.replace(sessionExpiredHomeHref());
           return;
         }
         setSession(data);
@@ -74,22 +72,26 @@ export default function OverviewPage() {
 
   if (loading && !error) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted">
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
+      >
         Loading overview…
-      </div>
+      </main>
     );
   }
 
   if (error || !session) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16">
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm">
-          {error ?? "Session not found."}
-        </p>
-        <Link href="/" className="text-sm font-semibold text-primary underline">
-          Back to Home
-        </Link>
-      </div>
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16"
+      >
+        <ErrorPanel
+          message={error ?? "Session not found."}
+          showHomeLink
+        />
+      </main>
     );
   }
 
@@ -103,7 +105,10 @@ export default function OverviewPage() {
   const banner = regimeCopy(session.facts.state);
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col px-5 pb-12 pt-6">
+    <main
+      id="main"
+      className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col px-5 pb-12 pt-6"
+    >
       <header className="mb-6 flex items-center justify-between">
         <Link
           href="/"
@@ -173,6 +178,7 @@ export default function OverviewPage() {
         <ul className="mt-3 space-y-2">
           {session.clauses.map((clause) => {
             const isOpen = expanded === clause.id;
+            const panelId = `clause-panel-${clause.id}`;
             const preview =
               clause.text.length > 140
                 ? `${clause.text.slice(0, 140)}…`
@@ -186,12 +192,16 @@ export default function OverviewPage() {
                     setExpanded(isOpen ? null : clause.id)
                   }
                   aria-expanded={isOpen}
+                  aria-controls={panelId}
                 >
                   <span className="text-xs font-semibold uppercase tracking-wide text-primary">
                     Clause {clause.index}
                     {clause.heading ? ` · ${clause.heading}` : ""}
                   </span>
-                  <p className="mt-1 text-sm text-ink whitespace-pre-wrap">
+                  <p
+                    id={panelId}
+                    className="mt-1 text-sm text-ink whitespace-pre-wrap"
+                  >
                     {isOpen ? clause.text : preview}
                   </p>
                 </button>
@@ -200,7 +210,7 @@ export default function OverviewPage() {
           })}
         </ul>
       </section>
-    </div>
+    </main>
   );
 }
 
@@ -222,32 +232,15 @@ function ActivityCard({
 }: {
   title: string;
   description: string;
-  /** When set, the card is an active link to that activity. */
-  href?: string;
+  href: string;
 }) {
-  if (href) {
-    return (
-      <Link
-        href={href}
-        className="rounded-xl border border-border bg-card px-3 py-4 transition hover:border-primary hover:bg-primary-soft"
-      >
-        <p className="text-sm font-semibold text-ink">{title}</p>
-        <p className="mt-1 text-xs text-ink-muted">{description}</p>
-      </Link>
-    );
-  }
-
   return (
-    <div
-      className="rounded-xl border border-border bg-card px-3 py-4 opacity-70"
-      aria-disabled="true"
-      title="Coming in a later phase"
+    <Link
+      href={href}
+      className="rounded-xl border border-border bg-card px-3 py-4 transition hover:border-primary hover:bg-primary-soft"
     >
       <p className="text-sm font-semibold text-ink">{title}</p>
       <p className="mt-1 text-xs text-ink-muted">{description}</p>
-      <p className="mt-2 text-[10px] uppercase tracking-wide text-ink-muted">
-        Next phase
-      </p>
-    </div>
+    </Link>
   );
 }

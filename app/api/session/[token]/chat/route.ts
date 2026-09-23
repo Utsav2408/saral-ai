@@ -11,6 +11,8 @@ import {
   tryAcquireChatLock,
 } from "@/lib/ai/chat-lock";
 import { jsonError } from "@/lib/api/errors";
+import { INTERNAL_ERROR_MESSAGE } from "@/lib/api/map-api-error";
+import { MAX_CHAT_MESSAGE_CHARS } from "@/lib/constants";
 import { safeLog } from "@/lib/logging/safe-log";
 import { sessionStore } from "@/lib/session/store";
 import type { ChatResponse } from "@/types/session";
@@ -34,128 +36,170 @@ export async function POST(
   NextResponse<ChatResponse | { error: { code: string; message: string } }>
 > {
   const started = Date.now();
-  const { token } = await context.params;
-
-  if (!sessionStore.isValidTokenFormat(token)) {
-    safeLog({
-      activity: "chat",
-      ok: false,
-      code: "INVALID_TOKEN",
-      latencyMs: Date.now() - started,
-    });
-    return jsonError(400, "INVALID_TOKEN", "Invalid session token.");
-  }
-
-  const session = sessionStore.get(token);
-  if (!session) {
-    safeLog({
-      activity: "chat",
-      ok: false,
-      code: "NOT_FOUND",
-      latencyMs: Date.now() - started,
-    });
-    return jsonError(
-      404,
-      "NOT_FOUND",
-      "Session not found or expired. Please upload your document again.",
-    );
-  }
-
-  let body: unknown;
   try {
-    body = await request.json();
+    const { token } = await context.params;
+
+    if (!sessionStore.isValidTokenFormat(token)) {
+      safeLog({
+        activity: "chat",
+        ok: false,
+        code: "INVALID_TOKEN",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(400, "INVALID_TOKEN", "Invalid session token.");
+    }
+
+    const session = sessionStore.get(token);
+    if (!session) {
+      safeLog({
+        activity: "chat",
+        ok: false,
+        code: "NOT_FOUND",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        404,
+        "NOT_FOUND",
+        "Session not found or expired. Please upload your document again.",
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      safeLog({
+        activity: "chat",
+        ok: false,
+        code: "EMPTY_MESSAGE",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        400,
+        "EMPTY_MESSAGE",
+        "Please enter a question about your lease.",
+      );
+    }
+
+    const message =
+      typeof body === "object" &&
+      body !== null &&
+      "message" in body &&
+      typeof (body as { message: unknown }).message === "string"
+        ? (body as { message: string }).message
+        : "";
+
+    const trimmed = message.trim();
+    if (!trimmed) {
+      safeLog({
+        activity: "chat",
+        ok: false,
+        code: "EMPTY_MESSAGE",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        400,
+        "EMPTY_MESSAGE",
+        "Please enter a question about your lease.",
+      );
+    }
+    if (trimmed.length > MAX_CHAT_MESSAGE_CHARS) {
+      safeLog({
+        activity: "chat",
+        ok: false,
+        code: "MESSAGE_TOO_LONG",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        400,
+        "MESSAGE_TOO_LONG",
+        "That question is too long. Please shorten it.",
+      );
+    }
+
+    const lock = tryAcquireChatLock(token);
+    if (!lock.ok) {
+      safeLog({
+        activity: "chat",
+        ok: false,
+        code: "RATE_LIMITED",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        429,
+        "RATE_LIMITED",
+        "Chat is already running or was just requested. Try again shortly.",
+      );
+    }
+
+    try {
+      const result = await runChatTurn({ session, message: trimmed });
+
+      if (!result.ok) {
+        const status =
+          result.code === "AI_NOT_CONFIGURED"
+            ? 503
+            : result.code === "RATE_LIMITED"
+              ? 429
+              : result.code === "EMPTY_MESSAGE" ||
+                  result.code === "MESSAGE_TOO_LONG"
+                ? 400
+                : result.code === "VALIDATION_FAILED" ||
+                    result.code === "NO_RETRIEVAL"
+                  ? 422
+                  : 502;
+
+        safeLog({
+          activity: "chat",
+          ok: false,
+          code: result.code,
+          validated: false,
+          promptTokens: result.usage?.promptTokens,
+          completionTokens: result.usage?.completionTokens,
+          latencyMs: Date.now() - started,
+        });
+
+        return jsonError(status, result.code, result.message);
+      }
+
+      const updated = sessionStore.update(token, {
+        messages: result.messages,
+      });
+
+      safeLog({
+        activity: "chat",
+        ok: true,
+        validated: true,
+        retrievedCount: result.retrievedCount,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        latencyMs: Date.now() - started,
+      });
+
+      const response: ChatResponse = {
+        token,
+        title: (updated ?? session).title,
+        reply: result.reply,
+        messages: result.messages,
+        regime: {
+          state: result.regime.state,
+          category: result.regime.category,
+          code: result.regime.code,
+          label: result.regime.label,
+        },
+      };
+
+      return NextResponse.json(response);
+    } finally {
+      releaseChatLock(token);
+    }
   } catch {
     safeLog({
       activity: "chat",
       ok: false,
-      code: "EMPTY_MESSAGE",
+      code: "INTERNAL",
       latencyMs: Date.now() - started,
     });
-    return jsonError(400, "EMPTY_MESSAGE", "Please enter a question about your lease.");
-  }
-
-  const message =
-    typeof body === "object" &&
-    body !== null &&
-    "message" in body &&
-    typeof (body as { message: unknown }).message === "string"
-      ? (body as { message: string }).message
-      : "";
-
-  const lock = tryAcquireChatLock(token);
-  if (!lock.ok) {
-    safeLog({
-      activity: "chat",
-      ok: false,
-      code: "RATE_LIMITED",
-      latencyMs: Date.now() - started,
-    });
-    return jsonError(
-      429,
-      "RATE_LIMITED",
-      "Chat is already running or was just requested. Try again shortly.",
-    );
-  }
-
-  try {
-    const result = await runChatTurn({ session, message });
-
-    if (!result.ok) {
-      const status =
-        result.code === "AI_NOT_CONFIGURED"
-          ? 503
-          : result.code === "RATE_LIMITED"
-            ? 429
-            : result.code === "EMPTY_MESSAGE" ||
-                result.code === "MESSAGE_TOO_LONG"
-              ? 400
-              : result.code === "VALIDATION_FAILED" ||
-                  result.code === "NO_RETRIEVAL"
-                ? 422
-                : 502;
-
-      safeLog({
-        activity: "chat",
-        ok: false,
-        code: result.code,
-        validated: false,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
-        latencyMs: Date.now() - started,
-      });
-
-      return jsonError(status, result.code, result.message);
-    }
-
-    const updated = sessionStore.update(token, {
-      messages: result.messages,
-    });
-
-    safeLog({
-      activity: "chat",
-      ok: true,
-      validated: true,
-      retrievedCount: result.retrievedCount,
-      promptTokens: result.usage.promptTokens,
-      completionTokens: result.usage.completionTokens,
-      latencyMs: Date.now() - started,
-    });
-
-    const response: ChatResponse = {
-      token,
-      title: (updated ?? session).title,
-      reply: result.reply,
-      messages: result.messages,
-      regime: {
-        state: result.regime.state,
-        category: result.regime.category,
-        code: result.regime.code,
-        label: result.regime.label,
-      },
-    };
-
-    return NextResponse.json(response);
-  } finally {
-    releaseChatLock(token);
+    return jsonError(500, "INTERNAL", INTERNAL_ERROR_MESSAGE);
   }
 }

@@ -1,7 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useRef, useState } from "react";
+import { ErrorPanel } from "@/components/ErrorPanel";
+import { mapApiErrorFromBody } from "@/lib/api/map-api-error";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import type { UploadResponse } from "@/types/session";
 
@@ -14,11 +16,13 @@ function greetingForHour(hour: number): string {
 /**
  * Home screen — upload PDF/TXT and hand off session token via sessionStorage.
  */
-export default function HomePage() {
+function HomePageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const expired = searchParams.get("reason") === "expired";
   const greeting = useMemo(
     () => greetingForHour(new Date().getHours()),
     [],
@@ -37,18 +41,22 @@ export default function HomePage() {
         | { error: { code: string; message: string } };
 
       if (!res.ok || "error" in data) {
-        const message =
-          "error" in data
-            ? data.error.message
-            : "Upload failed. Please try again.";
-        setError(message);
+        setError(
+          mapApiErrorFromBody(
+            res.status,
+            data,
+            "Upload failed. Please try again.",
+          ),
+        );
         return;
       }
 
       sessionStorage.setItem(SESSION_STORAGE_KEY, data.token);
       router.push("/overview");
     } catch {
-      setError("Could not reach the server. Check your connection and try again.");
+      setError(
+        "Could not reach the server. Check your connection and try again.",
+      );
     } finally {
       setBusy(false);
       if (inputRef.current) {
@@ -58,7 +66,10 @@ export default function HomePage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col px-5 pb-24 pt-8">
+    <main
+      id="main"
+      className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col px-5 pb-24 pt-8"
+    >
       <header className="mb-8 flex items-start justify-between gap-3">
         <div>
           <p className="text-sm text-ink-muted">{greeting}</p>
@@ -76,6 +87,15 @@ export default function HomePage() {
         </button>
       </header>
 
+      {expired ? (
+        <p
+          role="status"
+          className="mb-4 rounded-lg bg-primary-soft px-3 py-2 text-sm text-ink"
+        >
+          Your session ended. Upload your lease again to continue.
+        </p>
+      ) : null}
+
       <section
         className="rounded-2xl border border-dashed border-primary/40 bg-card p-5 shadow-sm"
         aria-labelledby="upload-heading"
@@ -88,6 +108,9 @@ export default function HomePage() {
         </p>
 
         <div className="mt-5 flex flex-col gap-3">
+          <label htmlFor="lease-file" className="sr-only">
+            Choose a PDF or text file
+          </label>
           <button
             type="button"
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
@@ -99,7 +122,7 @@ export default function HomePage() {
           </button>
           <button
             type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-card px-4 py-3 text-sm font-semibold text-primary/50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-card px-4 py-3 text-sm font-semibold text-ink-muted"
             disabled
             aria-label="Take photo — coming in a later phase"
             title="Coming later"
@@ -109,6 +132,7 @@ export default function HomePage() {
         </div>
 
         <input
+          id="lease-file"
           ref={inputRef}
           type="file"
           className="sr-only"
@@ -125,12 +149,9 @@ export default function HomePage() {
         </p>
 
         {error ? (
-          <p
-            role="alert"
-            className="mt-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-ink"
-          >
-            {error}
-          </p>
+          <div className="mt-4">
+            <ErrorPanel message={error} />
+          </div>
         ) : null}
       </section>
 
@@ -159,10 +180,27 @@ export default function HomePage() {
           <span className="font-semibold text-primary" aria-current="page">
             Home
           </span>
-          <span className="text-ink-muted/60">Documents</span>
-          <span className="text-ink-muted/60">Settings</span>
+          <span className="text-ink-muted">Documents</span>
+          <span className="text-ink-muted">Settings</span>
         </div>
       </nav>
-    </div>
+    </main>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          id="main"
+          className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
+        >
+          Loading…
+        </main>
+      }
+    >
+      <HomePageInner />
+    </Suspense>
   );
 }

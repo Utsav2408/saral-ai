@@ -30,9 +30,20 @@ test("unsupported file type shows an error", async ({ page }) => {
     mimeType: "image/png",
     buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
   });
-  await expect(page.locator('p[role="alert"]')).toContainText(
-    /PDF|plain text|supported/i,
+  await expect(
+    page.getByRole("alert").filter({ hasText: /PDF|plain text|supported/i }),
+  ).toBeVisible();
+});
+
+test("upload PDF lease and see Overview", async ({ page }) => {
+  const samplePdf = path.join(
+    process.cwd(),
+    "fixtures/leases/sample-lease.pdf",
   );
+  await page.goto("/");
+  await page.locator('input[type="file"]').setInputFiles(samplePdf);
+  await expect(page).toHaveURL(/\/overview/, { timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: /Clauses/ })).toBeVisible();
 });
 
 test("overview without session redirects to home", async ({ page }) => {

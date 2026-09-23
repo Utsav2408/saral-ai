@@ -11,6 +11,7 @@ import {
 } from "@/lib/ai/options-lock";
 import { runOptions } from "@/lib/ai/options";
 import { jsonError } from "@/lib/api/errors";
+import { INTERNAL_ERROR_MESSAGE } from "@/lib/api/map-api-error";
 import { safeLog } from "@/lib/logging/safe-log";
 import { sessionStore } from "@/lib/session/store";
 import type { OptionsResponse, OptionsResult } from "@/types/session";
@@ -51,133 +52,143 @@ export async function POST(
   NextResponse<OptionsResponse | { error: { code: string; message: string } }>
 > {
   const started = Date.now();
-  const { token } = await context.params;
-
-  if (!sessionStore.isValidTokenFormat(token)) {
-    safeLog({
-      activity: "options",
-      ok: false,
-      code: "INVALID_TOKEN",
-      latencyMs: Date.now() - started,
-    });
-    return jsonError(400, "INVALID_TOKEN", "Invalid session token.");
-  }
-
-  const session = sessionStore.get(token);
-  if (!session) {
-    safeLog({
-      activity: "options",
-      ok: false,
-      code: "NOT_FOUND",
-      latencyMs: Date.now() - started,
-    });
-    return jsonError(
-      404,
-      "NOT_FOUND",
-      "Session not found or expired. Please upload your document again.",
-    );
-  }
-
-  if (session.options) {
-    safeLog({
-      activity: "options",
-      ok: true,
-      cached: true,
-      validated: true,
-      escalation: session.options.escalation,
-      clauseCount: session.clauses.length,
-      latencyMs: Date.now() - started,
-    });
-    return NextResponse.json(
-      toOptionsResponse(
-        session.token,
-        session.title,
-        session.options,
-        true,
-      ),
-    );
-  }
-
-  const lock = tryAcquireOptionsLock(token);
-  if (!lock.ok) {
-    safeLog({
-      activity: "options",
-      ok: false,
-      code: "RATE_LIMITED",
-      clauseCount: session.clauses.length,
-      latencyMs: Date.now() - started,
-    });
-    return jsonError(
-      429,
-      "RATE_LIMITED",
-      "Options is already running or was just requested. Try again shortly.",
-    );
-  }
-
   try {
-    const result = await runOptions({ session });
+    const { token } = await context.params;
 
-    // Persist sticky escalation even on failure when the guard ran.
-    if (result.ok === false && result.escalation) {
-      sessionStore.update(token, { escalation: true });
-    }
-
-    if (!result.ok) {
-      const status =
-        result.code === "AI_NOT_CONFIGURED"
-          ? 503
-          : result.code === "RATE_LIMITED"
-            ? 429
-            : result.code === "NO_CLAUSES" ||
-                result.code === "VALIDATION_FAILED" ||
-                result.code === "NO_RETRIEVAL"
-              ? 422
-              : 502;
-
+    if (!sessionStore.isValidTokenFormat(token)) {
       safeLog({
         activity: "options",
         ok: false,
-        code: result.code,
-        validated: false,
-        cached: false,
-        escalation: result.escalation ?? session.escalation,
+        code: "INVALID_TOKEN",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(400, "INVALID_TOKEN", "Invalid session token.");
+    }
+
+    const session = sessionStore.get(token);
+    if (!session) {
+      safeLog({
+        activity: "options",
+        ok: false,
+        code: "NOT_FOUND",
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        404,
+        "NOT_FOUND",
+        "Session not found or expired. Please upload your document again.",
+      );
+    }
+
+    if (session.options) {
+      safeLog({
+        activity: "options",
+        ok: true,
+        cached: true,
+        validated: true,
+        escalation: session.options.escalation,
         clauseCount: session.clauses.length,
-        promptTokens: result.usage?.promptTokens,
-        completionTokens: result.usage?.completionTokens,
+        latencyMs: Date.now() - started,
+      });
+      return NextResponse.json(
+        toOptionsResponse(
+          session.token,
+          session.title,
+          session.options,
+          true,
+        ),
+      );
+    }
+
+    const lock = tryAcquireOptionsLock(token);
+    if (!lock.ok) {
+      safeLog({
+        activity: "options",
+        ok: false,
+        code: "RATE_LIMITED",
+        clauseCount: session.clauses.length,
+        latencyMs: Date.now() - started,
+      });
+      return jsonError(
+        429,
+        "RATE_LIMITED",
+        "Options is already running or was just requested. Try again shortly.",
+      );
+    }
+
+    try {
+      const result = await runOptions({ session });
+
+      // Persist sticky escalation even on failure when the guard ran.
+      if (result.ok === false && result.escalation) {
+        sessionStore.update(token, { escalation: true });
+      }
+
+      if (!result.ok) {
+        const status =
+          result.code === "AI_NOT_CONFIGURED"
+            ? 503
+            : result.code === "RATE_LIMITED"
+              ? 429
+              : result.code === "NO_CLAUSES" ||
+                  result.code === "VALIDATION_FAILED" ||
+                  result.code === "NO_RETRIEVAL"
+                ? 422
+                : 502;
+
+        safeLog({
+          activity: "options",
+          ok: false,
+          code: result.code,
+          validated: false,
+          cached: false,
+          escalation: result.escalation ?? session.escalation,
+          clauseCount: session.clauses.length,
+          promptTokens: result.usage?.promptTokens,
+          completionTokens: result.usage?.completionTokens,
+          latencyMs: Date.now() - started,
+        });
+
+        return jsonError(status, result.code, result.message);
+      }
+
+      const updated = sessionStore.update(token, {
+        options: result.options,
+        optionsCachedAt: Date.now(),
+        escalation: result.options.escalation,
+      });
+
+      safeLog({
+        activity: "options",
+        ok: true,
+        validated: true,
+        cached: false,
+        escalation: result.options.escalation,
+        retrievedCount: result.retrievedCount,
+        clauseCount: session.clauses.length,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
         latencyMs: Date.now() - started,
       });
 
-      return jsonError(status, result.code, result.message);
+      return NextResponse.json(
+        toOptionsResponse(
+          token,
+          (updated ?? session).title,
+          result.options,
+          false,
+        ),
+      );
+    } finally {
+      releaseOptionsLock(token);
     }
-
-    const updated = sessionStore.update(token, {
-      options: result.options,
-      optionsCachedAt: Date.now(),
-      escalation: result.options.escalation,
-    });
-
+  } catch {
     safeLog({
       activity: "options",
-      ok: true,
-      validated: true,
-      cached: false,
-      escalation: result.options.escalation,
-      retrievedCount: result.retrievedCount,
-      clauseCount: session.clauses.length,
-      promptTokens: result.usage.promptTokens,
-      completionTokens: result.usage.completionTokens,
+      ok: false,
+      code: "INTERNAL",
       latencyMs: Date.now() - started,
     });
-
-    return NextResponse.json(
-      toOptionsResponse(
-        token,
-        (updated ?? session).title,
-        result.options,
-        false,
-      ),
-    );
-  } finally {
-    releaseOptionsLock(token);
+    return jsonError(500, "INTERNAL", INTERNAL_ERROR_MESSAGE);
   }
 }

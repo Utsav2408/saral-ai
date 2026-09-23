@@ -244,7 +244,7 @@ function mapLlmError(err: unknown): ChatFailure {
     return {
       ok: false,
       code: "AI_NOT_CONFIGURED",
-      message: "AI is not configured. Set GROQ_API_KEY on the server.",
+      message: "AI is temporarily unavailable. Try again shortly.",
     };
   }
   if (APICallError.isInstance(err) && err.statusCode === 429) {
@@ -375,7 +375,7 @@ export async function runChatTurn(
     return {
       ok: false,
       code: "AI_NOT_CONFIGURED",
-      message: "AI is not configured. Set GROQ_API_KEY on the server.",
+      message: "AI is temporarily unavailable. Try again shortly.",
     };
   }
 

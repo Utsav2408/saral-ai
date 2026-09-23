@@ -159,4 +159,55 @@ describe("runOptions", () => {
       expect(result.reraChecks?.length).toBeGreaterThan(0);
     }
   });
+
+  it("returns NO_CLAUSES for empty session", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const result = await runOptions({
+      session: baseSession({ clauses: [] }),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("NO_CLAUSES");
+  });
+
+  it("returns OPTIONS_FAILED when generate throws", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const generate = vi.fn().mockRejectedValue(new Error("boom"));
+    const result = await runOptions({
+      session: baseSession(),
+      generate: generate as never,
+      lookup: () => [hit],
+      detect: () => [],
+      escalate: () => ({ triggered: false, matchedTermCount: 0 }),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("OPTIONS_FAILED");
+  });
+
+  it("retries then VALIDATION_FAILED on bad citations", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const bad = {
+      output: {
+        steps: [
+          {
+            id: "step-1",
+            title: "Invented",
+            body: "Cite a fake statute.",
+            citations: [{ id: "fake-id", label: "Fake" }],
+          },
+        ],
+      },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    };
+    const generate = vi.fn().mockResolvedValue(bad);
+    const result = await runOptions({
+      session: baseSession(),
+      generate: generate as never,
+      lookup: () => [hit],
+      detect: () => [],
+      escalate: () => ({ triggered: false, matchedTermCount: 0 }),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("VALIDATION_FAILED");
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
 });

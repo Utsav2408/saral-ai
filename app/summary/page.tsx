@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ErrorPanel } from "@/components/ErrorPanel";
+import {
+  fetchActivityOnce,
+  sessionExpiredHomeHref,
+} from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import type { SummaryResponse } from "@/types/session";
 
@@ -14,6 +19,7 @@ export default function SummaryPage() {
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     const token = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -24,62 +30,59 @@ export default function SummaryPage() {
 
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(
-          `/api/session/${encodeURIComponent(token)}/summary`,
-          { method: "POST" },
-        );
-        const body = (await res.json()) as
-          | SummaryResponse
-          | { error: { code: string; message: string } };
-        if (cancelled) return;
-        if (!res.ok || "error" in body) {
-          if (res.status === 404) {
-            sessionStorage.removeItem(SESSION_STORAGE_KEY);
-          }
-          setError(
-            "error" in body
-              ? body.error.message
-              : "Could not summarize this document.",
-          );
+      const result = await fetchActivityOnce<SummaryResponse>(
+        `/api/session/${encodeURIComponent(token)}/summary`,
+        "Could not summarize this document. Please try again.",
+      );
+      if (cancelled) return;
+      if (!result.ok) {
+        if (result.expired) {
+          sessionStorage.removeItem(SESSION_STORAGE_KEY);
+          router.replace(sessionExpiredHomeHref());
           return;
         }
-        setData(body);
-      } catch {
-        if (!cancelled) {
-          setError("Could not summarize this document. Please try again.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+        setError(result.message);
+        setLoading(false);
+        return;
       }
+      setData(result.data);
+      setError(null);
+      setLoading(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, retryKey]);
 
   if (loading && !error) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted">
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
+      >
         Building your summary…
-      </div>
+      </main>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16">
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm">
-          {error ?? "Something went wrong."}
-        </p>
-        <Link
-          href="/overview"
-          className="text-sm font-semibold text-primary underline"
-        >
-          Back to Overview
-        </Link>
-      </div>
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16"
+      >
+        <ErrorPanel
+          message={error ?? "Something went wrong."}
+          onRetry={() => {
+            setError(null);
+            setData(null);
+            setLoading(true);
+            setRetryKey((k) => k + 1);
+          }}
+          showOverviewLink
+        />
+      </main>
     );
   }
 
@@ -88,7 +91,7 @@ export default function SummaryPage() {
   );
 
   return (
-    <div className="mx-auto min-h-full w-full max-w-md px-5 pb-16 pt-6">
+    <main id="main" className="mx-auto min-h-full w-full max-w-md px-5 pb-16 pt-6">
       <header className="flex items-start gap-3">
         <Link
           href="/overview"
@@ -160,6 +163,6 @@ export default function SummaryPage() {
       {data.cached ? (
         <p className="mt-6 text-xs text-ink-muted">Loaded from session cache.</p>
       ) : null}
-    </div>
+    </main>
   );
 }

@@ -1,6 +1,7 @@
 /**
- * Central limits and allowlists for upload / parsing / Simplify.
- * Keep these conservative to bound memory and DoS surface.
+ * Central limits and allowlists for upload, parsing, GenAI activities, and
+ * citation hosts. Keep these conservative to bound memory, token spend, and
+ * DoS surface. Prefer importing from here over scattering magic numbers.
  */
 
 /** Maximum upload size in bytes (5 MB). */

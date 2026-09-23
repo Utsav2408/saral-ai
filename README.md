@@ -12,12 +12,15 @@ This repo follows [`Clarity_Final_Architecture.md`](./Clarity_Final_Architecture
 | 2 — Simplify | Done — see [`docs/phase-2.md`](./docs/phase-2.md) |
 | 3 — Corpus & Chat | Done — see [`docs/phase-3.md`](./docs/phase-3.md); sources in [`data/corpus/`](./data/corpus/) |
 | 4 — Summary & Options | Done — see [`docs/phase-4.md`](./docs/phase-4.md) |
+| 5 — Polish & Demo | Done — see [`docs/phase-5.md`](./docs/phase-5.md) |
 
 **Phase 2** adds Groq-powered plain-language paraphrases with `entity_check()`, session caching, and the Simplify screen (Plain / Original toggle).
 
 **Phase 3** seeds a small pre-embedded statute corpus (MH + UP + RERA/Model) and wires Chat: retrieval → one LLM call → citation validation → citation pills.
 
 **Phase 4** completes Summary (rule-based conflicts → one LLM → checklist) and Options (Escalation Guard → always-on RERA check → retrieval → one LLM), with an escalation banner on a planted fixture.
+
+**Phase 5** polishes error recovery, accessibility, security edges, and a scripted dry-run so a stranger can complete the full flow without narration.
 
 ## Quick start
 
@@ -29,7 +32,17 @@ npm run corpus:embed   # only needed after editing data/corpus/chunks/
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), upload `fixtures/leases/sample-lease.txt`, open Overview, then any of the four activities. Use `fixtures/leases/escalation-trigger-lease.txt` to demo the Options escalation banner.
+Open [http://localhost:3000](http://localhost:3000), upload `fixtures/leases/sample-lease.txt` (or `sample-lease.pdf`), open Overview, then any of the four activities.
+
+Demo fixtures:
+
+| File | Use |
+|------|-----|
+| `fixtures/leases/sample-lease.txt` / `.pdf` | Happy path |
+| `fixtures/leases/high-deposit-lease.txt` | Summary high-deposit flag |
+| `fixtures/leases/escalation-trigger-lease.txt` | Options escalation banner |
+
+Full walkthrough: [`docs/phase-5.md`](./docs/phase-5.md).
 
 ## Scripts
 

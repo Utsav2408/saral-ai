@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useEffectEvent } from "react";
+import { ErrorPanel } from "@/components/ErrorPanel";
+import { mapApiErrorFromBody } from "@/lib/api/map-api-error";
+import { sessionExpiredHomeHref } from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import { safeCitationHref } from "@/lib/chat/safe-citation-url";
 import type { ChatMessage, ChatResponse, SessionPublic } from "@/types/session";
@@ -22,9 +25,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const liveRef = useRef<HTMLDivElement | null>(null);
   const tokenRef = useRef<string | null>(null);
 
   const scrollToBottom = useEffectEvent(() => {
@@ -49,11 +54,7 @@ export default function ChatPage() {
         if (cancelled) return;
         if (!res.ok || "error" in data) {
           sessionStorage.removeItem(SESSION_STORAGE_KEY);
-          setError(
-            "error" in data
-              ? data.error.message
-              : "Session expired. Please upload again.",
-          );
+          router.replace(sessionExpiredHomeHref());
           return;
         }
         setTitle(data.title);
@@ -66,7 +67,7 @@ export default function ChatPage() {
         ]);
       } catch {
         if (!cancelled) {
-          setError("Could not load your session. Please try again.");
+          setLoadError("Could not load your session. Please try again.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -93,7 +94,6 @@ export default function ChatPage() {
 
     setError(null);
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
     setSending(true);
 
     try {
@@ -112,17 +112,22 @@ export default function ChatPage() {
       if (!res.ok || "error" in body) {
         if (res.status === 404) {
           sessionStorage.removeItem(SESSION_STORAGE_KEY);
+          router.replace(sessionExpiredHomeHref());
+          return;
         }
+        // Restore draft; do not leave an orphan user bubble.
+        setInput(text);
         setError(
-          "error" in body
-            ? body.error.message
-            : "Could not answer that question.",
+          mapApiErrorFromBody(
+            res.status,
+            body,
+            "Could not answer that question.",
+          ),
         );
         return;
       }
 
       setTitle(body.title);
-      // Prefer server history; keep the local greeting if server history is empty of greetings
       const serverMsgs = body.messages;
       setMessages((prev) => {
         const greeting = prev.find(
@@ -135,39 +140,44 @@ export default function ChatPage() {
         }
         return serverMsgs.length > 0 ? serverMsgs : [...prev, body.reply];
       });
+      if (liveRef.current) {
+        liveRef.current.textContent = "New reply from Clarity.";
+      }
     } catch {
+      setInput(text);
       setError("Could not answer that question. Please try again.");
     } finally {
       setSending(false);
     }
   }
 
-  if (loading && !error) {
+  if (loading && !loadError) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted">
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
+      >
         Opening chat…
-      </div>
+      </main>
     );
   }
 
-  if (error && messages.length === 0) {
+  if (loadError) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16">
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm">
-          {error}
-        </p>
-        <Link
-          href="/overview"
-          className="text-sm font-semibold text-primary underline"
-        >
-          Back to Overview
-        </Link>
-      </div>
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16"
+      >
+        <ErrorPanel message={loadError} showHomeLink showOverviewLink />
+      </main>
     );
   }
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-md flex-col px-5 pb-4 pt-6">
+    <main
+      id="main"
+      className="mx-auto flex min-h-full w-full max-w-md flex-col px-5 pb-4 pt-6"
+    >
       <header className="flex items-start gap-3">
         <Link
           href="/overview"
@@ -193,10 +203,15 @@ export default function ChatPage() {
             Thinking…
           </p>
         ) : null}
+        <div ref={liveRef} className="sr-only" aria-live="polite" />
         {error ? (
-          <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm">
-            {error}
-          </p>
+          <ErrorPanel
+            message={error}
+            onRetry={() => {
+              const draft = input.trim();
+              if (draft) void sendMessage(draft);
+            }}
+          />
         ) : null}
         <div ref={bottomRef} />
       </div>
@@ -244,7 +259,7 @@ export default function ChatPage() {
           </button>
         </form>
       </div>
-    </div>
+    </main>
   );
 }
 

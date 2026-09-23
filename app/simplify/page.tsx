@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ErrorPanel } from "@/components/ErrorPanel";
+import {
+  fetchActivityOnce,
+  sessionExpiredHomeHref,
+} from "@/lib/client/fetch-activity";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import type { SimplifyResponse } from "@/types/session";
 
@@ -17,6 +22,7 @@ export default function SimplifyPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<ViewMode>("plain");
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     const token = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -27,62 +33,59 @@ export default function SimplifyPage() {
 
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch(
-          `/api/session/${encodeURIComponent(token)}/simplify`,
-          { method: "POST" },
-        );
-        const body = (await res.json()) as
-          | SimplifyResponse
-          | { error: { code: string; message: string } };
-        if (cancelled) return;
-        if (!res.ok || "error" in body) {
-          if (res.status === 404) {
-            sessionStorage.removeItem(SESSION_STORAGE_KEY);
-          }
-          setError(
-            "error" in body
-              ? body.error.message
-              : "Could not simplify this document.",
-          );
+      const result = await fetchActivityOnce<SimplifyResponse>(
+        `/api/session/${encodeURIComponent(token)}/simplify`,
+        "Could not simplify this document. Please try again.",
+      );
+      if (cancelled) return;
+      if (!result.ok) {
+        if (result.expired) {
+          sessionStorage.removeItem(SESSION_STORAGE_KEY);
+          router.replace(sessionExpiredHomeHref());
           return;
         }
-        setData(body);
-      } catch {
-        if (!cancelled) {
-          setError("Could not simplify this document. Please try again.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+        setError(result.message);
+        setLoading(false);
+        return;
       }
+      setData(result.data);
+      setError(null);
+      setLoading(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, retryKey]);
 
   if (loading && !error) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted">
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md items-center justify-center px-5 py-16 text-ink-muted"
+      >
         Simplifying your lease…
-      </div>
+      </main>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16">
-        <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm">
-          {error ?? "Something went wrong."}
-        </p>
-        <Link
-          href="/overview"
-          className="text-sm font-semibold text-primary underline"
-        >
-          Back to Overview
-        </Link>
-      </div>
+      <main
+        id="main"
+        className="mx-auto flex min-h-full max-w-md flex-col gap-4 px-5 py-16"
+      >
+        <ErrorPanel
+          message={error ?? "Something went wrong."}
+          onRetry={() => {
+            setError(null);
+            setData(null);
+            setLoading(true);
+            setRetryKey((k) => k + 1);
+          }}
+          showOverviewLink
+        />
+      </main>
     );
   }
 
@@ -91,7 +94,7 @@ export default function SimplifyPage() {
   );
 
   return (
-    <div className="mx-auto min-h-full w-full max-w-md px-5 pb-16 pt-6">
+    <main id="main" className="mx-auto min-h-full w-full max-w-md px-5 pb-16 pt-6">
       <header className="flex items-start gap-3">
         <Link
           href="/overview"
@@ -112,20 +115,35 @@ export default function SimplifyPage() {
         className="mt-6 flex rounded-full border border-border bg-card p-1"
         role="tablist"
         aria-label="Text view"
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+            e.preventDefault();
+            setView((v) => (v === "plain" ? "original" : "plain"));
+          }
+        }}
       >
         <ViewTab
+          id="tab-plain"
+          panelId="panel-clauses"
           selected={view === "plain"}
           onSelect={() => setView("plain")}
           label="Plain language"
         />
         <ViewTab
+          id="tab-original"
+          panelId="panel-clauses"
           selected={view === "original"}
           onSelect={() => setView("original")}
           label="Original text"
         />
       </div>
 
-      <ul className="mt-6 space-y-3">
+      <ul
+        id="panel-clauses"
+        role="tabpanel"
+        aria-labelledby={view === "plain" ? "tab-plain" : "tab-original"}
+        className="mt-6 space-y-3"
+      >
         {data.clauses.map((clause) => {
           const plain = byId.get(clause.id);
           const body =
@@ -158,15 +176,19 @@ export default function SimplifyPage() {
           );
         })}
       </ul>
-    </div>
+    </main>
   );
 }
 
 function ViewTab({
+  id,
+  panelId,
   selected,
   onSelect,
   label,
 }: {
+  id: string;
+  panelId: string;
   selected: boolean;
   onSelect: () => void;
   label: string;
@@ -174,8 +196,11 @@ function ViewTab({
   return (
     <button
       type="button"
+      id={id}
       role="tab"
       aria-selected={selected}
+      aria-controls={panelId}
+      tabIndex={selected ? 0 : -1}
       onClick={onSelect}
       className={
         selected

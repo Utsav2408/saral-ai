@@ -155,4 +155,64 @@ describe("POST /api/session/[token]/options", () => {
     expect(res.status).toBe(422);
     expect(sessionStore.get(token)?.escalation).toBe(true);
   });
+
+  it("returns 503 when AI is not configured", async () => {
+    const token = await uploadSample();
+    runOptionsMock.mockResolvedValue({
+      ok: false,
+      code: "AI_NOT_CONFIGURED",
+      message: "AI is temporarily unavailable. Try again shortly.",
+    });
+    const res = await optionsRequest(token);
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error.code).toBe("AI_NOT_CONFIGURED");
+    expect(body.error.message).not.toMatch(/GROQ_API_KEY/);
+  });
+
+  it("maps provider RATE_LIMITED to 429", async () => {
+    const token = await uploadSample();
+    runOptionsMock.mockResolvedValue({
+      ok: false,
+      code: "RATE_LIMITED",
+      message: "Too many requests. Try again shortly.",
+    });
+    const res = await optionsRequest(token);
+    expect(res.status).toBe(429);
+  });
+
+  it("returns 429 when lock is held", async () => {
+    const token = await uploadSample();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    runOptionsMock.mockImplementation(async () => {
+      await gate;
+      return {
+        ok: true,
+        options: {
+          escalation: false,
+          reraChecks: [],
+          steps: [],
+          regime: {
+            state: "Maharashtra",
+            category: "residential_rent",
+            code: "rent_control",
+            label: "MRCA",
+          },
+        },
+        usage: {},
+        retried: false,
+        retrievedCount: 0,
+      };
+    });
+
+    const firstPromise = optionsRequest(token);
+    await new Promise((r) => setTimeout(r, 20));
+    const second = await optionsRequest(token);
+    expect(second.status).toBe(429);
+    release();
+    await firstPromise;
+  });
 });

@@ -96,7 +96,7 @@ describe("POST /api/session/[token]/chat", () => {
     runChatTurnMock.mockResolvedValue({
       ok: false,
       code: "AI_NOT_CONFIGURED",
-      message: "AI is not configured. Set GROQ_API_KEY on the server.",
+      message: "AI is temporarily unavailable. Try again shortly.",
     });
     const res = await chatRequest(token, "Is my deposit legal?");
     expect(res.status).toBe(503);

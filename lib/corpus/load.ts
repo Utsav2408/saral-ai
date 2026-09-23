@@ -4,22 +4,46 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { EMBED_ALGORITHM, EMBEDDING_DIM } from "@/lib/corpus/embed";
 import type { EmbeddedChunk, EmbeddingsFile } from "@/lib/corpus/types";
 
 let cached: EmbeddedChunk[] | null = null;
 
 /**
+ * Root directory that embeddings paths must stay under (LFI guard).
+ */
+export function corpusDataRoot(): string {
+  return resolve(process.cwd(), "data", "corpus");
+}
+
+/**
  * Resolve embeddings path. Override via CLARITY_EMBEDDINGS_PATH (tests).
+ * Override must resolve under `data/corpus/` — absolute escapes are rejected.
  * Path is statically scoped under data/corpus for Turbopack tracing.
  */
 export function embeddingsPath(): string {
   const override = process.env.CLARITY_EMBEDDINGS_PATH?.trim();
   if (override) {
-    return override;
+    return assertUnderCorpusRoot(override);
   }
-  return join(process.cwd(), "data", "corpus", "embeddings.json");
+  return join(corpusDataRoot(), "embeddings.json");
+}
+
+/**
+ * Ensure a path resolves inside data/corpus (no `..` escape).
+ * Complexity: O(path length).
+ */
+export function assertUnderCorpusRoot(candidate: string): string {
+  const root = corpusDataRoot();
+  const resolved = isAbsolute(candidate)
+    ? normalize(resolve(candidate))
+    : normalize(resolve(root, candidate));
+  const rel = relative(root, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error("Embeddings path must stay under data/corpus");
+  }
+  return resolved;
 }
 
 /**

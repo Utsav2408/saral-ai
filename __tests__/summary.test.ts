@@ -165,4 +165,45 @@ describe("runSummary", () => {
       expect(result.summary.flags).toEqual(sampleFlags);
     }
   });
+
+  it("returns SUMMARY_FAILED when generate throws", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const generate = vi.fn().mockRejectedValue(new Error("boom"));
+    const result = await runSummary({
+      session: baseSession(),
+      generate: generate as never,
+      detect: () => sampleFlags,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("SUMMARY_FAILED");
+  });
+
+  it("retries then VALIDATION_FAILED on bad flag ids", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const bad = {
+      output: {
+        overview: "Overview with invented number 99999999.",
+        flagDescriptions: [
+          { flagId: "flag-not-real", description: "Bad flag." },
+        ],
+        checklist: [
+          {
+            id: "check-1",
+            text: "Do something about 99999999.",
+            priority: "high",
+          },
+        ],
+      },
+      usage: { inputTokens: 1, outputTokens: 1 },
+    };
+    const generate = vi.fn().mockResolvedValue(bad);
+    const result = await runSummary({
+      session: baseSession(),
+      generate: generate as never,
+      detect: () => sampleFlags,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("VALIDATION_FAILED");
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
 });
