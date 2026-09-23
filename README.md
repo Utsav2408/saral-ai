@@ -58,6 +58,23 @@ Full walkthrough: [`docs/phase-5.md`](./docs/phase-5.md).
 | `npm run corpus:embed` | Rebuild `data/corpus/embeddings.json` from curated chunks |
 | `npm run audit` | Dependency audit (production) |
 
+## CI/CD
+
+**Checks** run in GitHub Actions on every pull request and push to `main`. **Deploy** is handled by [Vercel’s Git integration](https://vercel.com/docs/git): preview URLs on PRs, production on `main`.
+
+| Layer | What runs |
+|-------|-----------|
+| GitHub Actions ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) | `lint`, `typecheck`, unit tests, `npm audit` |
+| Vercel (Git connected) | Preview + production deploys |
+
+### One-time setup
+
+1. Import this repo in the [Vercel dashboard](https://vercel.com/new) (or `npx vercel link` then connect Git).
+2. Add `GROQ_API_KEY` in Vercel project env for Preview and Production.
+3. Optional — gate production on CI: in Vercel → Project → **Deployment Checks**, require the GitHub `CI / Checks` workflow to pass before promoting to production.
+
+No GitHub deploy secrets are required for this setup.
+
 ## Privacy model
 
 Sessions live in a process-local `Map` keyed by a random token held in `sessionStorage`. Closing the tab (or restarting the server) clears them. Uploaded bytes are never written to disk. GenAI logs are metadata-only (no document or chat content).
