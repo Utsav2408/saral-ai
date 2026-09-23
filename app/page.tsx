@@ -64,7 +64,7 @@ function HomePageInner() {
   return (
     <main
       id="main"
-      className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col px-5 pb-24 pt-8"
+      className="mx-auto flex min-h-full w-full max-w-md flex-1 flex-col px-5 pb-12 pt-8"
     >
       <header className="mb-8 flex items-start justify-between gap-3">
         <div>
@@ -154,19 +154,6 @@ function HomePageInner() {
           {t("home.recent.empty")}
         </div>
       </section>
-
-      <nav
-        className="fixed bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur"
-        aria-label={t("home.nav.primary")}
-      >
-        <div className="mx-auto flex max-w-md justify-around px-4 py-3 text-xs">
-          <span className="font-semibold text-primary" aria-current="page">
-            {t("home.nav.home")}
-          </span>
-          <span className="text-ink-muted">{t("home.nav.documents")}</span>
-          <span className="text-ink-muted">{t("home.nav.settings")}</span>
-        </div>
-      </nav>
     </main>
   );
 }

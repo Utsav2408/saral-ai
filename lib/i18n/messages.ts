@@ -31,10 +31,6 @@ const en = {
   "home.recent": "Recent",
   "home.recent.empty":
     "No saved documents — sessions end when you close this tab.",
-  "home.nav.primary": "Primary",
-  "home.nav.home": "Home",
-  "home.nav.documents": "Documents",
-  "home.nav.settings": "Settings",
   "home.loading": "Loading…",
 
   "overview.backHome": "Back to Home",
@@ -125,10 +121,6 @@ const hi: Record<MessageKey, string> = {
   "home.recent": "हाल ही में",
   "home.recent.empty":
     "कोई सहेजा दस्तावेज़ नहीं — टैब बंद होने पर सत्र समाप्त हो जाता है।",
-  "home.nav.primary": "मुख्य",
-  "home.nav.home": "होम",
-  "home.nav.documents": "दस्तावेज़",
-  "home.nav.settings": "सेटिंग्स",
   "home.loading": "लोड हो रहा है…",
 
   "overview.backHome": "होम पर वापस",

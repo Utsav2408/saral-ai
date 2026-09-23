@@ -52,10 +52,11 @@ const summaryOutputSchema = z.object({
     .array(
       z.object({
         id: z.string().describe("Stable checklist item id, e.g. check-1"),
+        // Required string (empty when unlinked): Groq json_schema needs every
+        // property listed in `required` — optional fields fail schema validation.
         flagId: z
           .string()
-          .optional()
-          .describe("Optional link to a provided flag id"),
+          .describe("Link to a provided flag id, or empty string if none"),
         text: z.string().describe("Actionable checklist item for the tenant"),
         priority: z.enum(["high", "medium", "low"]),
       }),

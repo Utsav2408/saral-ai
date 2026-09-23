@@ -55,7 +55,9 @@ const optionsOutputSchema = z.object({
         id: z.string(),
         title: z.string(),
         body: z.string(),
-        citations: z.array(citationOutputSchema).optional(),
+        // Required array (may be empty): Groq json_schema needs every property
+        // listed in `required` — optional fields fail schema validation.
+        citations: z.array(citationOutputSchema),
       }),
     )
     .describe("2–5 practical next-step options for the tenant"),

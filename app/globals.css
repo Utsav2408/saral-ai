@@ -40,3 +40,16 @@ body {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+/* Clickable controls should show a pointer (browsers often leave buttons as default). */
+button:not(:disabled),
+a[href],
+[role="button"]:not([aria-disabled="true"]),
+label[for],
+summary {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}

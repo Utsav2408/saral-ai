@@ -9,7 +9,7 @@ import { createGroq, groq, type GroqProvider } from "@ai-sdk/groq";
 export type ClarityLanguageModel = ReturnType<GroqProvider>;
 
 /** Groq model id used for all Clarity GenAI activities unless overridden. */
-const CLARITY_MODEL_ID = "llama-3.3-70b-versatile" as const;
+const CLARITY_MODEL_ID = "openai/gpt-oss-120b" as const;
 
 /**
  * Typed error when GROQ_API_KEY is missing.
