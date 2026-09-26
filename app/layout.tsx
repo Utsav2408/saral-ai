@@ -34,7 +34,7 @@ const displayDeva = Noto_Serif_Devanagari({
 });
 
 export const metadata: Metadata = {
-  title: "Clarity — Understand your lease",
+  title: "Saral AI — Understand your lease",
   description:
     "Upload a residential lease to see parsed clauses and key facts. No accounts required.",
 };
